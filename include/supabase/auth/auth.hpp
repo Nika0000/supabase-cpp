@@ -191,6 +191,13 @@ struct AdminGenerateLinkResponse
     User user;
 };
 
+/// Which sessions the server revokes on sign-out. The local session is always cleared.
+enum class SignOutScope
+{
+    Global, ///< every session of the user
+    Local   ///< only the current session
+};
+
 enum class AuthEvent
 {
     InitialSession,
@@ -264,7 +271,8 @@ class AuthClient
 
     Result<Session> refreshSession(std::string_view refreshToken = {});
     Result<Session> setSession(Session session);
-    Result<void> signOut();
+    /// Clears the local session even when the server call fails.
+    Result<void> signOut(SignOutScope scope = SignOutScope::Global);
     Result<User> getUser();
     Result<User> updateUser(const UserAttributes& attributes);
     Result<void> resetPasswordForEmail(std::string_view email, std::string_view redirectTo = {});

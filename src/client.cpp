@@ -29,6 +29,21 @@ Client::Client(std::string url, std::string anonKey, ClientOptions options)
 {
 }
 
+postgrest::QueryBuilder SchemaClient::from(std::string_view table) const { return postgrest::QueryBuilder(ctx_, std::string(table)); }
+
+postgrest::FilterBuilder SchemaClient::rpc(std::string_view fn, const Json& args, postgrest::RpcOptions options) const
+{
+    return postgrest::makeRpc(ctx_, fn, args, options);
+}
+
+SchemaClient Client::schema(std::string_view name) const
+{
+    // Copying the context keeps the transport and the bearer callback, which refers to the one auth instance.
+    auto scoped    = std::make_shared<Context>(*ctx_);
+    scoped->schema = std::string(name);
+    return SchemaClient(std::move(scoped));
+}
+
 postgrest::QueryBuilder Client::from(std::string_view table) const { return postgrest::QueryBuilder(ctx_, std::string(table)); }
 
 postgrest::FilterBuilder Client::rpc(std::string_view fn, const Json& args, postgrest::RpcOptions options) const

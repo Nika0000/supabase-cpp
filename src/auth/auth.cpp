@@ -141,8 +141,9 @@ struct AuthClient::Impl
     std::shared_ptr<SessionStorage> storage;
     bool autoRefresh = true;
 
-    std::mutex mutex;        // guards session, loaded, listeners
-    std::mutex refreshMutex; // serializes network refreshes
+    std::mutex mutex;                                      // guards session, loaded, listeners
+    std::mutex refreshMutex;                               // serializes network refreshes
+    std::optional<std::pair<std::string, Error>> rejected; // last refresh token rejected, guarded by refreshMutex
     std::optional<Session> session;
     bool loaded = false;
     std::map<int, AuthCallback> listeners;
@@ -257,7 +258,18 @@ struct AuthClient::Impl
         // Another thread may have refreshed while we waited.
         if (const auto current = snapshot(); current && current->refresh_token != token)
             return *current;
-        return grant("refresh_token", Json { { "refresh_token", token } }, AuthEvent::TokenRefreshed);
+        // A queued caller holding the token that was just rejected must not sign out again.
+        if (rejected && rejected->first == token)
+            return rejected->second;
+        auto result = grant("refresh_token", Json { { "refresh_token", token } }, AuthEvent::TokenRefreshed);
+        if (!result && (result.error().status == 400 || result.error().status == 401))
+        {
+            // Definitive rejection: the refresh token is unusable. Transient errors keep the session.
+            rejected = std::make_pair(token, result.error());
+            if (const auto current = snapshot(); current && current->refresh_token == token)
+                clear();
+        }
+        return result;
     }
 
     std::optional<Session> freshSession()
@@ -435,13 +447,18 @@ Result<Session> AuthClient::setSession(Session session)
     return session;
 }
 
-Result<void> AuthClient::signOut()
+Result<void> AuthClient::signOut(SignOutScope scope)
 {
     const auto current = impl_->snapshot();
     Result<void> outcome;
     if (current)
     {
-        auto reply = impl_->call(http::Method::Post, "/auth/v1/logout", nullptr, current->access_token);
+        auto reply = impl_->call(
+            http::Method::Post,
+            scope == SignOutScope::Local ? "/auth/v1/logout?scope=local" : "/auth/v1/logout",
+            nullptr,
+            current->access_token
+        );
         // An already-invalid token means we are effectively signed out; only surface other failures.
         if (!reply && reply.error().status != 401 && reply.error().status != 403 && reply.error().status != 404)
             outcome = reply.error();

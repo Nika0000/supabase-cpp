@@ -101,7 +101,7 @@ class RealtimeChannel
     friend class detail::Core;
     struct Impl;
     RealtimeChannel(std::weak_ptr<detail::Core> core, std::string topic, ChannelOptions options);
-    std::unique_ptr<Impl> impl_;
+    std::unique_ptr<Impl> m_impl;
 };
 
 /// Realtime client. Mirrors supabase-js `RealtimeClient`. One websocket and one worker thread per client,
@@ -128,7 +128,7 @@ class RealtimeClient
     void removeAllChannels() const;
 
   private:
-    std::shared_ptr<detail::Core> core_;
+    std::shared_ptr<detail::Core> m_core;
 };
 
 }

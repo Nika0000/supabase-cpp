@@ -142,31 +142,31 @@ std::string urlEncode(std::string_view text)
 }
 
 FilterBuilder::FilterBuilder(std::shared_ptr<const Context> ctx, std::string path, http::Method method)
-    : ctx_(std::move(ctx)), path_(std::move(path)), method_(method)
+    : m_ctx(std::move(ctx)), m_path(std::move(path)), m_method(method)
 {
 }
 
 FilterBuilder& FilterBuilder::addFilter(std::string_view column, std::string_view op, std::string_view value)
 {
-    params_.emplace_back(std::string(column), std::string(op) + "." + std::string(value));
+    m_params.emplace_back(std::string(column), std::string(op) + "." + std::string(value));
     return *this;
 }
 
 FilterBuilder& FilterBuilder::addParam(std::string name, std::string value)
 {
-    params_.emplace_back(std::move(name), std::move(value));
+    m_params.emplace_back(std::move(name), std::move(value));
     return *this;
 }
 
 FilterBuilder& FilterBuilder::setBody(Json body)
 {
-    body_ = std::move(body);
+    m_body = std::move(body);
     return *this;
 }
 
 FilterBuilder& FilterBuilder::setPrefer(std::string_view token)
 {
-    prefer_.emplace_back(token);
+    m_prefer.emplace_back(token);
     return *this;
 }
 
@@ -211,9 +211,9 @@ FilterBuilder& FilterBuilder::filter(std::string_view column, std::string_view o
 
 FilterBuilder& FilterBuilder::select(std::string_view columns)
 {
-    select_ = compactColumns(columns);
-    if (isWrite(method_))
-        prefer_.emplace_back("return=representation");
+    m_select = compactColumns(columns);
+    if (isWrite(m_method))
+        m_prefer.emplace_back("return=representation");
     return *this;
 }
 
@@ -223,11 +223,15 @@ FilterBuilder& FilterBuilder::order(std::string_view column, OrderOptions option
     if (options.nullsFirst)
         term += *options.nullsFirst ? ".nullsfirst" : ".nullslast";
 
-    const auto it = std::find_if(params_.begin(), params_.end(), [](const auto& p) { return p.first == "order"; });
-    if (it == params_.end())
-        params_.emplace_back("order", std::move(term));
+    const auto it = std::ranges::find_if(m_params, [](const auto& p) { return p.first == "order"; });
+    if (it == m_params.end())
+    {
+        m_params.emplace_back("order", std::move(term));
+    }
     else
+    {
         it->second += "," + term;
+    }
     return *this;
 }
 
@@ -235,35 +239,35 @@ FilterBuilder& FilterBuilder::limit(std::int64_t count) { return addParam("limit
 
 FilterBuilder& FilterBuilder::range(std::int64_t from, std::int64_t to)
 {
-    range_ = std::pair { from, to };
+    m_range = std::pair { from, to };
     return *this;
 }
 
 FilterBuilder& FilterBuilder::single()
 {
-    single_      = true;
-    maybeSingle_ = false;
+    m_single      = true;
+    m_maybeSingle = false;
     return *this;
 }
 
 FilterBuilder& FilterBuilder::maybeSingle()
 {
-    maybeSingle_ = true;
-    single_      = false;
+    m_maybeSingle = true;
+    m_single      = false;
     return *this;
 }
 
 FilterBuilder& FilterBuilder::count(CountMode mode)
 {
-    count_ = mode;
+    m_count = mode;
     return *this;
 }
 
 http::Request FilterBuilder::buildRequest() const
 {
     http::Request request;
-    request.method  = method_;
-    request.timeout = ctx_->timeout;
+    request.method  = m_method;
+    request.timeout = m_ctx->timeout;
 
     std::string query;
     const auto append = [&query](std::string_view name, std::string_view value)
@@ -271,20 +275,20 @@ http::Request FilterBuilder::buildRequest() const
         query += query.empty() ? "" : "&";
         query += urlEncode(name) + "=" + urlEncode(value);
     };
-    if (!select_.empty())
-        append("select", select_);
-    for (const auto& [name, value] : params_)
+    if (!m_select.empty())
+        append("select", m_select);
+    for (const auto& [name, value] : m_params)
         append(name, value);
-    if (range_)
+    if (m_range)
     {
-        append("offset", std::to_string(range_->first));
-        append("limit", std::to_string(range_->second - range_->first + 1));
+        append("offset", std::to_string(m_range->first));
+        append("limit", std::to_string(m_range->second - m_range->first + 1));
     }
-    request.url = ctx_->endpoint(path_) + (query.empty() ? "" : "?" + query);
+    request.url = m_ctx->endpoint(m_path) + (query.empty() ? "" : "?" + query);
 
-    request.headers = ctx_->baseHeaders();
-    request.headers.emplace_back(isWrite(method_) ? "Content-Profile" : "Accept-Profile", ctx_->schema);
-    request.headers.emplace_back("Accept", single_ ? "application/vnd.pgrst.object+json" : "application/json");
+    request.headers = m_ctx->baseHeaders();
+    request.headers.emplace_back(isWrite(m_method) ? "Content-Profile" : "Accept-Profile", m_ctx->schema);
+    request.headers.emplace_back("Accept", m_single ? "application/vnd.pgrst.object+json" : "application/json");
 
     std::string prefer;
     const auto addPrefer = [&prefer](std::string_view token)
@@ -294,23 +298,23 @@ http::Request FilterBuilder::buildRequest() const
         prefer += prefer.empty() ? "" : ",";
         prefer += token;
     };
-    for (const auto& token : prefer_)
+    for (const auto& token : m_prefer)
         addPrefer(token);
-    addPrefer(countToken(count_));
+    addPrefer(countToken(m_count));
     if (!prefer.empty())
         request.headers.emplace_back("Prefer", std::move(prefer));
 
-    if (body_)
+    if (m_body)
     {
         request.headers.emplace_back("Content-Type", "application/json");
-        request.body = body_->dump();
+        request.body = m_body->dump();
     }
     return request;
 }
 
 Result<Response<Json>> FilterBuilder::execute() const
 {
-    auto sent = ctx_->transport->send(buildRequest());
+    auto sent = m_ctx->transport->send(buildRequest());
     if (!sent)
         return sent.error();
     const http::Response& response = sent.value();
@@ -327,7 +331,7 @@ Result<Response<Json>> FilterBuilder::execute() const
             return makeError(errc::Parse, "invalid JSON in response", response.status);
     }
 
-    if (maybeSingle_ && out.data.is_array())
+    if (m_maybeSingle && out.data.is_array())
     {
         if (out.data.size() > 1)
         {
@@ -340,25 +344,25 @@ Result<Response<Json>> FilterBuilder::execute() const
     return out;
 }
 
-QueryBuilder::QueryBuilder(std::shared_ptr<const Context> ctx, std::string table) : ctx_(std::move(ctx)), table_(std::move(table)) {}
+QueryBuilder::QueryBuilder(std::shared_ptr<const Context> ctx, std::string table) : m_ctx(std::move(ctx)), m_table(std::move(table)) {}
 
 FilterBuilder QueryBuilder::select(std::string_view columns, CountMode count) const
 {
-    FilterBuilder builder(ctx_, "/rest/v1/" + table_, http::Method::Get);
+    FilterBuilder builder(m_ctx, "/rest/v1/" + m_table, http::Method::Get);
     builder.select(columns).count(count);
     return builder;
 }
 
 FilterBuilder QueryBuilder::insert(const Json& values, WriteOptions options) const
 {
-    FilterBuilder builder(ctx_, "/rest/v1/" + table_, http::Method::Post);
+    FilterBuilder builder(m_ctx, "/rest/v1/" + m_table, http::Method::Post);
     builder.setBody(values).count(options.count);
     return builder;
 }
 
 FilterBuilder QueryBuilder::upsert(const Json& values, UpsertOptions options) const
 {
-    FilterBuilder builder(ctx_, "/rest/v1/" + table_, http::Method::Post);
+    FilterBuilder builder(m_ctx, "/rest/v1/" + m_table, http::Method::Post);
     builder.setBody(values).count(options.count);
     builder.setPrefer(options.ignoreDuplicates ? "resolution=ignore-duplicates" : "resolution=merge-duplicates");
     if (!options.onConflict.empty())
@@ -368,14 +372,14 @@ FilterBuilder QueryBuilder::upsert(const Json& values, UpsertOptions options) co
 
 FilterBuilder QueryBuilder::update(const Json& values, WriteOptions options) const
 {
-    FilterBuilder builder(ctx_, "/rest/v1/" + table_, http::Method::Patch);
+    FilterBuilder builder(m_ctx, "/rest/v1/" + m_table, http::Method::Patch);
     builder.setBody(values).count(options.count);
     return builder;
 }
 
 FilterBuilder QueryBuilder::remove(WriteOptions options) const
 {
-    FilterBuilder builder(ctx_, "/rest/v1/" + table_, http::Method::Delete);
+    FilterBuilder builder(m_ctx, "/rest/v1/" + m_table, http::Method::Delete);
     builder.count(options.count);
     return builder;
 }

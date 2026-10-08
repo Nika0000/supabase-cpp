@@ -18,7 +18,7 @@ class GraphQLClient
     [[nodiscard]] Result<Json> query(std::string_view document, const Json& variables = Json::object()) const;
 
   private:
-    std::shared_ptr<const Context> ctx_;
+    std::shared_ptr<const Context> m_ctx;
 };
 
 }

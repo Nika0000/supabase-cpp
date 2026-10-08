@@ -48,7 +48,7 @@ class FunctionsClient
   private:
     [[nodiscard]] http::Request build(std::string_view name, const InvokeOptions& options) const;
 
-    std::shared_ptr<const Context> ctx_;
+    std::shared_ptr<const Context> m_ctx;
 };
 
 }

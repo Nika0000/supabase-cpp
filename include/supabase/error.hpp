@@ -33,7 +33,7 @@ namespace errc
 
 [[nodiscard]] inline Error makeError(std::string_view code, std::string message, int status = 0)
 {
-    return Error { std::string(code), std::move(message), status, {}, {} };
+    return Error { .code = std::string(code), .message = std::move(message), .status = status, .details = {}, .hint = {} };
 }
 
 }

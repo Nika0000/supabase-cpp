@@ -108,8 +108,8 @@ class StorageFileApi
     [[nodiscard]] Result<UploadResult>
     put(http::Method method, std::string_view path, std::string_view data, const FileOptions& options) const;
 
-    std::shared_ptr<const Context> ctx_;
-    std::string bucket_;
+    std::shared_ptr<const Context> m_ctx;
+    std::string m_bucket;
 };
 
 /// Storage client. Mirrors supabase-js `storage`.
@@ -127,7 +127,7 @@ class StorageClient
     [[nodiscard]] Result<void> deleteBucket(std::string_view id) const;
 
   private:
-    std::shared_ptr<const Context> ctx_;
+    std::shared_ptr<const Context> m_ctx;
 };
 
 }

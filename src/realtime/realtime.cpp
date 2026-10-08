@@ -5,15 +5,15 @@
 #include <supabase/ws.hpp>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
-#include <iterator>
 #include <mutex>
 #include <optional>
 #include <thread>
 #include <vector>
 
 // Phoenix channels protocol v1 over a text websocket (`vsn=1.0.0`).
-// Lock order: RealtimeChannel::Impl::mu, then Core::mu_. Core never calls into a channel while holding mu_.
+// Lock order: RealtimeChannel::Impl::mu, then Core::m_mu. Core never calls into a channel while holding m_mu.
 namespace supabase::realtime
 {
 
@@ -22,13 +22,17 @@ namespace
     using Clock = std::chrono::steady_clock;
     using Calls = std::vector<std::function<void()>>;
 
-    constexpr auto kHeartbeatInterval                       = std::chrono::seconds(25);
-    constexpr auto kJoinTimeout                             = std::chrono::seconds(10);
-    constexpr auto kRejoinDelay                             = std::chrono::seconds(2);
-    constexpr auto kConnectTimeout                          = std::chrono::seconds(10);
-    constexpr auto kPollInterval                            = std::chrono::milliseconds(50);
-    constexpr std::chrono::milliseconds kReconnectBackoff[] = {
-        std::chrono::milliseconds(1000), std::chrono::milliseconds(2000), std::chrono::milliseconds(5000), std::chrono::milliseconds(10000)
+    constexpr auto kHeartbeatInterval = std::chrono::seconds(25);
+    constexpr auto kJoinTimeout       = std::chrono::seconds(10);
+    constexpr auto kRejoinDelay       = std::chrono::seconds(2);
+    constexpr auto kConnectTimeout    = std::chrono::seconds(10);
+    constexpr auto kPollInterval      = std::chrono::milliseconds(50);
+
+    constexpr std::array<std::chrono::milliseconds, 4> kReconnectBackoff = {
+        std::chrono::milliseconds(1000),
+        std::chrono::milliseconds(2000),
+        std::chrono::milliseconds(5000),
+        std::chrono::milliseconds(10000),
     };
 
     std::string str(const Json& object, const char* key)
@@ -37,10 +41,10 @@ namespace
         return it != object.end() && it->is_string() ? it->get<std::string>() : std::string();
     }
 
-    Json field(const Json& object, const char* key, Json fallback = Json::object())
+    Json field(const Json& object, const char* key, const Json& fallback = Json::object())
     {
         const auto it = object.find(key);
-        return it != object.end() && !it->is_null() ? *it : std::move(fallback);
+        return it != object.end() && !it->is_null() ? *it : fallback;
     }
 
     std::string dump(const Json& json) { return json.dump(-1, ' ', false, Json::error_handler_t::replace); }
@@ -93,12 +97,12 @@ namespace detail
     class Core : public std::enable_shared_from_this<Core>
     {
       public:
-        explicit Core(std::shared_ptr<const Context> ctx) : ctx_(std::move(ctx)) {}
+        explicit Core(std::shared_ptr<const Context> ctx) : m_ctx(std::move(ctx)) {}
         ~Core()
         {
             stop();
-            if (worker_.joinable()) // destroyed from the worker's own callback
-                worker_.detach();
+            if (m_worker.joinable()) // destroyed from the worker's own callback
+                m_worker.detach();
         }
 
         std::shared_ptr<RealtimeChannel> channel(std::string_view name, ChannelOptions options);
@@ -109,9 +113,9 @@ namespace detail
         Result<void> removeChannel(const std::shared_ptr<RealtimeChannel>& channel);
         void removeAll();
 
-        std::string nextRef() { return std::to_string(++ref_); }
+        std::string nextRef() { return std::to_string(++m_ref); }
         std::string token() const;
-        bool connected() const noexcept { return connected_; }
+        bool connected() const noexcept { return m_connected; }
 
       private:
         std::vector<std::shared_ptr<RealtimeChannel>> channels() const;
@@ -121,21 +125,21 @@ namespace detail
         void dispatch(std::string_view raw);
         void closeChannels();
 
-        std::shared_ptr<const Context> ctx_;
-        std::mutex lifeMu_; ///< serializes start/stop
-        std::thread worker_;
-        std::atomic<std::thread::id> workerId_ {}; ///< lets callbacks on the worker skip lifeMu_
-        std::atomic_bool stop_ { false };
-        std::atomic_bool connected_ { false };
-        std::atomic<std::uint64_t> ref_ { 0 };
+        std::shared_ptr<const Context> m_ctx;
+        std::mutex m_lifeMu; ///< serializes start/stop
+        std::thread m_worker;
+        std::atomic<std::thread::id> m_workerId; ///< lets callbacks on the worker skip m_lifeMu
+        std::atomic_bool m_stop { false };
+        std::atomic_bool m_connected { false };
+        std::atomic<std::uint64_t> m_ref { 0 };
 
-        mutable std::mutex mu_; ///< guards the members below
-        std::condition_variable wake_;
-        std::vector<std::string> outbox_;
-        std::vector<std::shared_ptr<RealtimeChannel>> channels_;
-        std::string authOverride_;
+        mutable std::mutex m_mu; ///< guards the members below
+        std::condition_variable m_wake;
+        std::vector<std::string> m_outbox;
+        std::vector<std::shared_ptr<RealtimeChannel>> m_channels;
+        std::string m_authOverride;
 
-        std::string heartbeatRef_; ///< worker thread only
+        std::string m_heartbeatRef; ///< worker thread only
     };
 }
 
@@ -156,8 +160,8 @@ struct RealtimeChannel::Impl
     bool wantJoin      = false; ///< the user asked to be subscribed
     bool joinPending   = false; ///< a phx_join must be (re)sent
     std::string joinRef;
-    Clock::time_point joinDeadline {};
-    Clock::time_point rejoinAt {};
+    Clock::time_point joinDeadline;
+    Clock::time_point rejoinAt;
     SubscribeCallback onStatus;
     Json presence = Json::object();
 
@@ -413,7 +417,7 @@ struct RealtimeChannel::Impl
 };
 
 RealtimeChannel::RealtimeChannel(std::weak_ptr<detail::Core> core, std::string topic, ChannelOptions options)
-    : impl_(std::make_unique<Impl>(std::move(core), std::move(topic), std::move(options)))
+    : m_impl(std::make_unique<Impl>(std::move(core), std::move(topic), std::move(options)))
 {
 }
 
@@ -425,7 +429,7 @@ RealtimeChannel& RealtimeChannel::onPostgresChanges(PostgresChangesFilter filter
     binding.kind     = Binding::Kind::Postgres;
     binding.filter   = std::move(filter);
     binding.callback = std::move(callback);
-    impl_->addBinding(std::move(binding));
+    m_impl->addBinding(std::move(binding));
     return *this;
 }
 
@@ -435,7 +439,7 @@ RealtimeChannel& RealtimeChannel::onBroadcast(std::string_view event, EventCallb
     binding.kind     = Binding::Kind::Broadcast;
     binding.event    = std::string(event);
     binding.callback = std::move(callback);
-    impl_->addBinding(std::move(binding));
+    m_impl->addBinding(std::move(binding));
     return *this;
 }
 
@@ -445,7 +449,7 @@ RealtimeChannel& RealtimeChannel::onPresence(PresenceEvent event, EventCallback 
     binding.kind     = Binding::Kind::Presence;
     binding.presence = event;
     binding.callback = std::move(callback);
-    impl_->addBinding(std::move(binding));
+    m_impl->addBinding(std::move(binding));
     return *this;
 }
 
@@ -455,54 +459,54 @@ RealtimeChannel& RealtimeChannel::on(std::string_view event, EventCallback callb
     binding.kind     = Binding::Kind::Raw;
     binding.event    = std::string(event);
     binding.callback = std::move(callback);
-    impl_->addBinding(std::move(binding));
+    m_impl->addBinding(std::move(binding));
     return *this;
 }
 
 Result<void> RealtimeChannel::subscribe(SubscribeCallback callback)
 {
-    const auto core = impl_->core.lock();
+    const auto core = m_impl->core.lock();
     if (!core)
         return makeError(errc::Cancelled, "realtime client was destroyed");
     {
-        std::lock_guard lock(impl_->mu);
-        if (impl_->wantJoin)
+        std::lock_guard lock(m_impl->mu);
+        if (m_impl->wantJoin)
             return makeError(errc::InvalidArgument, "channel is already subscribed");
-        impl_->wantJoin    = true;
-        impl_->joinPending = true;
-        impl_->state       = ChannelState::Joining;
-        impl_->rejoinAt    = Clock::time_point {};
-        impl_->joinRef.clear();
-        impl_->onStatus = std::move(callback);
+        m_impl->wantJoin    = true;
+        m_impl->joinPending = true;
+        m_impl->state       = ChannelState::Joining;
+        m_impl->rejoinAt    = Clock::time_point {};
+        m_impl->joinRef.clear();
+        m_impl->onStatus = std::move(callback);
     }
     auto started = core->start();
     if (!started.ok())
     {
-        std::lock_guard lock(impl_->mu);
-        impl_->wantJoin    = false;
-        impl_->joinPending = false;
-        impl_->state       = ChannelState::Closed;
+        std::lock_guard lock(m_impl->mu);
+        m_impl->wantJoin    = false;
+        m_impl->joinPending = false;
+        m_impl->state       = ChannelState::Closed;
     }
     return started;
 }
 
 Result<void> RealtimeChannel::unsubscribe()
 {
-    const auto core = impl_->core.lock();
+    const auto core = m_impl->core.lock();
     SubscribeCallback callback;
     std::string leaveFrame;
     {
-        std::lock_guard lock(impl_->mu);
-        if (!impl_->wantJoin && impl_->state == ChannelState::Closed)
+        std::lock_guard lock(m_impl->mu);
+        if (!m_impl->wantJoin && m_impl->state == ChannelState::Closed)
             return {};
-        if (core && !impl_->joinRef.empty())
-            leaveFrame = makeFrame(impl_->topic, "phx_leave", Json::object(), core->nextRef(), impl_->joinRef);
-        impl_->wantJoin    = false;
-        impl_->joinPending = false;
-        impl_->state       = ChannelState::Closed;
-        impl_->joinRef.clear();
-        impl_->presence = Json::object();
-        callback        = impl_->onStatus;
+        if (core && !m_impl->joinRef.empty())
+            leaveFrame = makeFrame(m_impl->topic, "phx_leave", Json::object(), core->nextRef(), m_impl->joinRef);
+        m_impl->wantJoin    = false;
+        m_impl->joinPending = false;
+        m_impl->state       = ChannelState::Closed;
+        m_impl->joinRef.clear();
+        m_impl->presence = Json::object();
+        callback         = m_impl->onStatus;
     }
     if (core && !leaveFrame.empty())
         core->push(std::move(leaveFrame));
@@ -512,20 +516,20 @@ Result<void> RealtimeChannel::unsubscribe()
 
 Result<void> RealtimeChannel::send(std::string_view event, const Json& payload)
 {
-    const auto core = impl_->core.lock();
+    const auto core = m_impl->core.lock();
     if (!core)
         return makeError(errc::Cancelled, "realtime client was destroyed");
     std::string frame;
     {
-        std::lock_guard lock(impl_->mu);
-        if (impl_->state != ChannelState::Joined)
+        std::lock_guard lock(m_impl->mu);
+        if (m_impl->state != ChannelState::Joined)
             return makeError(errc::InvalidArgument, "channel is not joined");
         frame = makeFrame(
-            impl_->topic,
+            m_impl->topic,
             "broadcast",
             { { "type", "broadcast" }, { "event", event }, { "payload", payload } },
             core->nextRef(),
-            impl_->joinRef
+            m_impl->joinRef
         );
     }
     core->push(std::move(frame));
@@ -534,20 +538,20 @@ Result<void> RealtimeChannel::send(std::string_view event, const Json& payload)
 
 Result<void> RealtimeChannel::track(const Json& payload)
 {
-    const auto core = impl_->core.lock();
+    const auto core = m_impl->core.lock();
     if (!core)
         return makeError(errc::Cancelled, "realtime client was destroyed");
     std::string frame;
     {
-        std::lock_guard lock(impl_->mu);
-        if (impl_->state != ChannelState::Joined)
+        std::lock_guard lock(m_impl->mu);
+        if (m_impl->state != ChannelState::Joined)
             return makeError(errc::InvalidArgument, "channel is not joined");
         frame = makeFrame(
-            impl_->topic,
+            m_impl->topic,
             "presence",
             { { "type", "presence" }, { "event", "track" }, { "payload", payload } },
             core->nextRef(),
-            impl_->joinRef
+            m_impl->joinRef
         );
     }
     core->push(std::move(frame));
@@ -556,15 +560,15 @@ Result<void> RealtimeChannel::track(const Json& payload)
 
 Result<void> RealtimeChannel::untrack()
 {
-    const auto core = impl_->core.lock();
+    const auto core = m_impl->core.lock();
     if (!core)
         return makeError(errc::Cancelled, "realtime client was destroyed");
     std::string frame;
     {
-        std::lock_guard lock(impl_->mu);
-        if (impl_->state != ChannelState::Joined)
+        std::lock_guard lock(m_impl->mu);
+        if (m_impl->state != ChannelState::Joined)
             return makeError(errc::InvalidArgument, "channel is not joined");
-        frame = makeFrame(impl_->topic, "presence", { { "type", "presence" }, { "event", "untrack" } }, core->nextRef(), impl_->joinRef);
+        frame = makeFrame(m_impl->topic, "presence", { { "type", "presence" }, { "event", "untrack" } }, core->nextRef(), m_impl->joinRef);
     }
     core->push(std::move(frame));
     return {};
@@ -572,101 +576,102 @@ Result<void> RealtimeChannel::untrack()
 
 Json RealtimeChannel::presenceState() const
 {
-    std::lock_guard lock(impl_->mu);
-    return impl_->presence;
+    std::lock_guard lock(m_impl->mu);
+    return m_impl->presence;
 }
 
 ChannelState RealtimeChannel::state() const
 {
-    std::lock_guard lock(impl_->mu);
-    return impl_->state;
+    std::lock_guard lock(m_impl->mu);
+    return m_impl->state;
 }
 
-const std::string& RealtimeChannel::topic() const noexcept { return impl_->topic; }
+const std::string& RealtimeChannel::topic() const noexcept { return m_impl->topic; }
 
 namespace detail
 {
     std::shared_ptr<RealtimeChannel> Core::channel(std::string_view name, ChannelOptions options)
     {
         std::string topic = name.rfind("realtime:", 0) == 0 ? std::string(name) : "realtime:" + std::string(name);
-        std::lock_guard lock(mu_);
-        for (const auto& existing : channels_)
+        std::lock_guard lock(m_mu);
+        for (const auto& existing : m_channels)
             if (existing->topic() == topic)
                 return existing;
         std::shared_ptr<RealtimeChannel> created(new RealtimeChannel(weak_from_this(), std::move(topic), std::move(options)));
-        channels_.push_back(created);
+        m_channels.push_back(created);
         return created;
     }
 
     Result<void> Core::start()
     {
-        if (workerId_ == std::this_thread::get_id()) // called from a callback
-            return stop_ ? Result<void>(makeError(errc::InvalidArgument, "realtime is disconnecting")) : Result<void>();
-        std::lock_guard life(lifeMu_);
-        if (worker_.joinable())
+        if (m_workerId == std::this_thread::get_id()) // called from a callback
+            return m_stop ? Result<void>(makeError(errc::InvalidArgument, "realtime is disconnecting")) : Result<void>();
+        std::lock_guard life(m_lifeMu);
+        if (m_worker.joinable())
         {
-            if (!stop_)
+            if (!m_stop)
                 return {};
-            worker_.join();
-            workerId_ = std::thread::id();
+            m_worker.join();
+            m_workerId = std::thread::id();
         }
-        if (!ctx_->socketFactory)
+        if (!m_ctx->socketFactory)
             return makeError(errc::NotImplemented, "no websocket factory configured");
-        stop_     = false;
-        worker_   = std::thread([this] { run(); });
-        workerId_ = worker_.get_id();
+        m_stop     = false;
+        m_worker   = std::thread([this] { run(); });
+        m_workerId = m_worker.get_id();
         return {};
     }
 
     void Core::stop()
     {
-        const bool onWorker = workerId_ == std::this_thread::get_id();
-        std::unique_lock life(lifeMu_, std::defer_lock);
+        const bool onWorker = m_workerId == std::this_thread::get_id();
+        std::unique_lock life(m_lifeMu, std::defer_lock);
         if (!onWorker)
             life.lock();
-        stop_ = true;
+        m_stop = true;
         {
-            std::lock_guard lock(mu_); // pairs with the wait predicate so the wake-up is not lost
+            std::lock_guard lock(m_mu); // pairs with the wait predicate so the wake-up is not lost
         }
-        wake_.notify_all();
-        if (onWorker || !worker_.joinable())
+        m_wake.notify_all();
+        if (onWorker || !m_worker.joinable())
             return; // from a callback the loop exits on its own; the next start/stop joins
-        worker_.join();
-        workerId_ = std::thread::id();
+        m_worker.join();
+        m_workerId = std::thread::id();
     }
 
     void Core::push(std::string frame)
     {
-        std::lock_guard lock(mu_);
-        outbox_.push_back(std::move(frame));
+        std::lock_guard lock(m_mu);
+        m_outbox.push_back(std::move(frame));
     }
 
     std::string Core::token() const
     {
         {
-            std::lock_guard lock(mu_);
-            if (!authOverride_.empty())
-                return authOverride_;
+            std::lock_guard lock(m_mu);
+            if (!m_authOverride.empty())
+                return m_authOverride;
         }
-        return ctx_->token();
+        return m_ctx->token();
     }
 
     void Core::setAuth(std::string token)
     {
         {
-            std::lock_guard lock(mu_);
-            authOverride_ = std::move(token);
+            std::lock_guard lock(m_mu);
+            m_authOverride = std::move(token);
         }
         const std::string current = this->token();
         for (const auto& channel : channels())
         {
             std::string frame;
             {
-                std::lock_guard lock(channel->impl_->mu);
-                if (channel->impl_->state != ChannelState::Joined)
+                std::lock_guard lock(channel->m_impl->mu);
+                if (channel->m_impl->state != ChannelState::Joined)
                     continue;
-                frame
-                    = makeFrame(channel->impl_->topic, "access_token", { { "access_token", current } }, nextRef(), channel->impl_->joinRef);
+                frame = makeFrame(
+                    channel->m_impl->topic, "access_token", { { "access_token", current } }, nextRef(), channel->m_impl->joinRef
+                );
             }
             push(std::move(frame));
         }
@@ -677,8 +682,8 @@ namespace detail
         if (!channel)
             return makeError(errc::InvalidArgument, "channel is null");
         auto result = channel->unsubscribe();
-        std::lock_guard lock(mu_);
-        channels_.erase(std::remove(channels_.begin(), channels_.end(), channel), channels_.end());
+        std::lock_guard lock(m_mu);
+        m_channels.erase(std::remove(m_channels.begin(), m_channels.end(), channel), m_channels.end());
         return result;
     }
 
@@ -690,43 +695,43 @@ namespace detail
 
     std::vector<std::shared_ptr<RealtimeChannel>> Core::channels() const
     {
-        std::lock_guard lock(mu_);
-        return channels_;
+        std::lock_guard lock(m_mu);
+        return m_channels;
     }
 
     std::string Core::url() const
     {
-        std::string base = ctx_->url;
+        std::string base = m_ctx->url;
         if (base.rfind("https://", 0) == 0)
             base.replace(0, 8, "wss://");
         else if (base.rfind("http://", 0) == 0)
             base.replace(0, 7, "ws://");
-        return base + "/realtime/v1/websocket?apikey=" + ctx_->anonKey + "&vsn=1.0.0";
+        return base + "/realtime/v1/websocket?apikey=" + m_ctx->anonKey + "&vsn=1.0.0";
     }
 
     void Core::run()
     {
         std::size_t attempt = 0;
-        while (!stop_)
+        while (!m_stop)
         {
-            auto socket = ctx_->socketFactory();
-            auto opened = socket ? socket->connect(url(), ctx_->headers, kConnectTimeout)
+            auto socket = m_ctx->socketFactory();
+            auto opened = socket ? socket->connect(url(), m_ctx->headers, kConnectTimeout)
                                  : Result<void>(makeError(errc::Network, "websocket factory returned null"));
             if (opened.ok())
             {
-                attempt    = 0;
-                connected_ = true;
+                attempt     = 0;
+                m_connected = true;
                 session(*socket);
-                connected_ = false;
+                m_connected = false;
                 socket->close();
                 for (const auto& channel : channels())
-                    channel->impl_->onDisconnected();
+                    channel->m_impl->onDisconnected();
             }
-            if (stop_)
+            if (m_stop)
                 break;
-            std::unique_lock lock(mu_);
-            wake_.wait_for(
-                lock, kReconnectBackoff[std::min<std::size_t>(attempt++, std::size(kReconnectBackoff) - 1)], [this] { return stop_.load(); }
+            std::unique_lock lock(m_mu);
+            m_wake.wait_for(
+                lock, kReconnectBackoff[std::min<std::size_t>(attempt++, kReconnectBackoff.size() - 1)], [this] { return m_stop.load(); }
             );
         }
         closeChannels();
@@ -735,32 +740,32 @@ namespace detail
     void Core::session(ws::Socket& socket)
     {
         {
-            std::lock_guard lock(mu_);
-            outbox_.clear(); // anything queued for the previous connection is stale
+            std::lock_guard lock(m_mu);
+            m_outbox.clear(); // anything queued for the previous connection is stale
         }
-        heartbeatRef_.clear();
+        m_heartbeatRef.clear();
         auto nextHeartbeat = Clock::now() + kHeartbeatInterval;
 
-        while (!stop_)
+        while (!m_stop)
         {
             std::vector<std::string> out;
             {
-                std::lock_guard lock(mu_);
-                out.swap(outbox_);
+                std::lock_guard lock(m_mu);
+                out.swap(m_outbox);
             }
             const auto now = Clock::now();
             for (const auto& channel : channels())
             {
-                channel->impl_->checkTimeout(now);
-                if (auto join = channel->impl_->takeJoinFrame(now, *this))
+                channel->m_impl->checkTimeout(now);
+                if (auto join = channel->m_impl->takeJoinFrame(now, *this))
                     out.push_back(std::move(*join));
             }
             if (now >= nextHeartbeat)
             {
-                if (!heartbeatRef_.empty())
+                if (!m_heartbeatRef.empty())
                     return; // previous heartbeat was never answered: the link is dead
-                heartbeatRef_ = nextRef();
-                out.push_back(makeFrame("phoenix", "heartbeat", Json::object(), heartbeatRef_));
+                m_heartbeatRef = nextRef();
+                out.push_back(makeFrame("phoenix", "heartbeat", Json::object(), m_heartbeatRef));
                 nextHeartbeat = now + kHeartbeatInterval;
             }
             for (const auto& frame : out)
@@ -783,14 +788,14 @@ namespace detail
         const std::string topic = str(message, "topic");
         if (topic == "phoenix")
         {
-            if (str(message, "event") == "phx_reply" && str(message, "ref") == heartbeatRef_)
-                heartbeatRef_.clear();
+            if (str(message, "event") == "phx_reply" && str(message, "ref") == m_heartbeatRef)
+                m_heartbeatRef.clear();
             return;
         }
         for (const auto& channel : channels())
-            if (channel->impl_->topic == topic)
+            if (channel->m_impl->topic == topic)
             {
-                channel->impl_->handle(message);
+                channel->m_impl->handle(message);
                 return;
             }
     }
@@ -800,34 +805,36 @@ namespace detail
         for (const auto& channel : channels())
         {
             SubscribeCallback callback;
-            bool wasActive;
+            bool wasActive = false;
+
             {
-                std::lock_guard lock(channel->impl_->mu);
-                wasActive                   = channel->impl_->wantJoin;
-                callback                    = channel->impl_->onStatus;
-                channel->impl_->wantJoin    = false;
-                channel->impl_->joinPending = false;
-                channel->impl_->state       = ChannelState::Closed;
-                channel->impl_->joinRef.clear();
+                std::lock_guard lock(channel->m_impl->mu);
+                wasActive                    = channel->m_impl->wantJoin;
+                callback                     = channel->m_impl->onStatus;
+                channel->m_impl->wantJoin    = false;
+                channel->m_impl->joinPending = false;
+                channel->m_impl->state       = ChannelState::Closed;
+                channel->m_impl->joinRef.clear();
             }
+
             if (wasActive)
                 runCalls(RealtimeChannel::Impl::statusCall(callback, SubscribeStatus::Closed));
         }
     }
 }
 
-RealtimeClient::RealtimeClient(std::shared_ptr<const Context> ctx) : core_(std::make_shared<detail::Core>(std::move(ctx))) {}
+RealtimeClient::RealtimeClient(std::shared_ptr<const Context> ctx) : m_core(std::make_shared<detail::Core>(std::move(ctx))) {}
 
 std::shared_ptr<RealtimeChannel> RealtimeClient::channel(std::string_view name, ChannelOptions options) const
 {
-    return core_->channel(name, std::move(options));
+    return m_core->channel(name, std::move(options));
 }
 
-Result<void> RealtimeClient::connect() const { return core_->start(); }
-void RealtimeClient::disconnect() const { core_->stop(); }
-bool RealtimeClient::isConnected() const { return core_->connected(); }
-void RealtimeClient::setAuth(std::string token) const { core_->setAuth(std::move(token)); }
-Result<void> RealtimeClient::removeChannel(const std::shared_ptr<RealtimeChannel>& channel) const { return core_->removeChannel(channel); }
-void RealtimeClient::removeAllChannels() const { core_->removeAll(); }
+Result<void> RealtimeClient::connect() const { return m_core->start(); }
+void RealtimeClient::disconnect() const { m_core->stop(); }
+bool RealtimeClient::isConnected() const { return m_core->connected(); }
+void RealtimeClient::setAuth(std::string token) const { m_core->setAuth(std::move(token)); }
+Result<void> RealtimeClient::removeChannel(const std::shared_ptr<RealtimeChannel>& channel) const { return m_core->removeChannel(channel); }
+void RealtimeClient::removeAllChannels() const { m_core->removeAll(); }
 
 }

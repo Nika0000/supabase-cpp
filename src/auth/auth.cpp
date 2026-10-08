@@ -109,29 +109,29 @@ void to_json(Json& j, const Session& session)
     };
 }
 
-std::optional<std::string> MemorySessionStorage::load() { return value_; }
-void MemorySessionStorage::save(const std::string& serialized) { value_ = serialized; }
-void MemorySessionStorage::clear() { value_.reset(); }
+std::optional<std::string> MemorySessionStorage::load() { return m_value; }
+void MemorySessionStorage::save(const std::string& serialized) { m_value = serialized; }
+void MemorySessionStorage::clear() { m_value.reset(); }
 
-Subscription::Subscription(std::function<void()> unsubscribe) : unsubscribe_(std::move(unsubscribe)) {}
+Subscription::Subscription(std::function<void()> unsubscribe) : m_unsubscribe(std::move(unsubscribe)) {}
 
 Subscription::~Subscription() { unsubscribe(); }
 
-Subscription::Subscription(Subscription&& other) noexcept : unsubscribe_(std::exchange(other.unsubscribe_, nullptr)) {}
+Subscription::Subscription(Subscription&& other) noexcept : m_unsubscribe(std::exchange(other.m_unsubscribe, nullptr)) {}
 
 Subscription& Subscription::operator=(Subscription&& other) noexcept
 {
     if (this != &other)
     {
         unsubscribe();
-        unsubscribe_ = std::exchange(other.unsubscribe_, nullptr);
+        m_unsubscribe = std::exchange(other.m_unsubscribe, nullptr);
     }
     return *this;
 }
 
 void Subscription::unsubscribe()
 {
-    if (auto fn = std::exchange(unsubscribe_, nullptr))
+    if (auto fn = std::exchange(m_unsubscribe, nullptr))
         fn();
 }
 
@@ -206,9 +206,10 @@ struct AuthClient::Impl
         emit(AuthEvent::SignedOut, std::nullopt);
     }
 
-    bool needsRefresh(const Session& s) const { return s.expires_at != 0 && s.expires_at - nowSeconds() < kRefreshMarginSeconds; }
-
-    // --- HTTP ------------------------------------------------------------
+    [[nodiscard]] bool needsRefresh(const Session& s) const
+    {
+        return s.expires_at != 0 && s.expires_at - nowSeconds() < kRefreshMarginSeconds;
+    }
 
     /// `bearer` empty -> anon key.
     Result<Json> call(http::Method method, const std::string& path, const Json* body, const std::string& bearer)
@@ -290,14 +291,14 @@ struct AuthClient::Impl
 };
 
 AuthClient::AuthClient(std::shared_ptr<Context> ctx, std::shared_ptr<SessionStorage> storage, bool autoRefreshToken)
-    : impl_(std::make_shared<Impl>())
+    : m_impl(std::make_shared<Impl>())
 {
-    impl_->ctx         = std::move(ctx);
-    impl_->storage     = storage ? std::move(storage) : std::make_shared<MemorySessionStorage>();
-    impl_->autoRefresh = autoRefreshToken;
+    m_impl->ctx         = std::move(ctx);
+    m_impl->storage     = storage ? std::move(storage) : std::make_shared<MemorySessionStorage>();
+    m_impl->autoRefresh = autoRefreshToken;
 
     // Weak capture: Context outlives neither the client nor creates a reference cycle.
-    impl_->ctx->bearer = [weak = std::weak_ptr<Impl>(impl_), anon = impl_->ctx->anonKey]()
+    m_impl->ctx->bearer = [weak = std::weak_ptr<Impl>(m_impl), anon = m_impl->ctx->anonKey]()
     {
         const auto impl = weak.lock();
         return impl ? impl->bearerToken() : anon;
@@ -341,12 +342,12 @@ Result<AuthResponse> AuthClient::signUp(const SignUpCredentials& credentials)
     if (!credentials.data.is_null())
         body["data"] = credentials.data;
 
-    auto reply = impl_->call(http::Method::Post, withRedirect("/auth/v1/signup", credentials.redirectTo), &body, {});
+    auto reply = m_impl->call(http::Method::Post, withRedirect("/auth/v1/signup", credentials.redirectTo), &body, {});
     if (!reply)
         return reply.error();
     auto response = toAuthResponse(reply.value());
     if (response.session)
-        impl_->store(*response.session, AuthEvent::SignedIn);
+        m_impl->store(*response.session, AuthEvent::SignedIn);
     return response;
 }
 
@@ -359,7 +360,7 @@ Result<AuthResponse> AuthClient::signInWithPassword(const PasswordCredentials& c
     putIfSet(body, "phone", credentials.phone);
     body["password"] = credentials.password;
 
-    auto session = impl_->grant("password", body, AuthEvent::SignedIn);
+    auto session = m_impl->grant("password", body, AuthEvent::SignedIn);
     if (!session)
         return session.error();
     return AuthResponse { session.value().user, session.value() };
@@ -371,7 +372,7 @@ Result<AuthResponse> AuthClient::signInWithIdToken(const IdTokenCredentials& cre
     putIfSet(body, "nonce", credentials.nonce);
     putIfSet(body, "access_token", credentials.accessToken);
 
-    auto session = impl_->grant("id_token", body, AuthEvent::SignedIn);
+    auto session = m_impl->grant("id_token", body, AuthEvent::SignedIn);
     if (!session)
         return session.error();
     return AuthResponse { session.value().user, session.value() };
@@ -387,7 +388,7 @@ Result<void> AuthClient::signInWithOtp(const OtpCredentials& credentials)
     if (!credentials.data.is_null())
         body["data"] = credentials.data;
 
-    auto reply = impl_->call(http::Method::Post, withRedirect("/auth/v1/otp", credentials.redirectTo), &body, {});
+    auto reply = m_impl->call(http::Method::Post, withRedirect("/auth/v1/otp", credentials.redirectTo), &body, {});
     if (!reply)
         return reply.error();
     return {};
@@ -395,7 +396,7 @@ Result<void> AuthClient::signInWithOtp(const OtpCredentials& credentials)
 
 std::string AuthClient::getOAuthSignInUrl(std::string_view provider, const OAuthOptions& options) const
 {
-    std::string url = impl_->ctx->endpoint("/auth/v1/authorize?provider=") + postgrest::urlEncode(provider);
+    std::string url = m_impl->ctx->endpoint("/auth/v1/authorize?provider=") + postgrest::urlEncode(provider);
     if (!options.redirectTo.empty())
         url += "&redirect_to=" + postgrest::urlEncode(options.redirectTo);
     if (!options.scopes.empty())
@@ -406,8 +407,8 @@ std::string AuthClient::getOAuthSignInUrl(std::string_view provider, const OAuth
     {
         auto verifier = pkce::generateVerifier();
         url += "&code_challenge=" + pkce::challengeS256(verifier) + "&code_challenge_method=s256";
-        const std::lock_guard lock(impl_->mutex);
-        impl_->codeVerifier = std::move(verifier);
+        const std::lock_guard lock(m_impl->mutex);
+        m_impl->codeVerifier = std::move(verifier);
     }
     return url;
 }
@@ -416,14 +417,14 @@ Result<Session> AuthClient::exchangeCodeForSession(std::string_view authCode)
 {
     std::string verifier;
     {
-        const std::lock_guard lock(impl_->mutex);
-        verifier = std::exchange(impl_->codeVerifier, std::string());
+        const std::lock_guard lock(m_impl->mutex);
+        verifier = std::exchange(m_impl->codeVerifier, std::string());
     }
     if (verifier.empty())
         return makeError(errc::InvalidArgument, "no PKCE code verifier; call getOAuthSignInUrl with pkce first");
     if (authCode.empty())
         return makeError(errc::InvalidArgument, "auth code is required");
-    return impl_->grant("pkce", Json { { "auth_code", std::string(authCode) }, { "code_verifier", verifier } }, AuthEvent::SignedIn);
+    return m_impl->grant("pkce", Json { { "auth_code", std::string(authCode) }, { "code_verifier", verifier } }, AuthEvent::SignedIn);
 }
 
 Result<Session> AuthClient::refreshSession(std::string_view refreshToken)
@@ -431,29 +432,29 @@ Result<Session> AuthClient::refreshSession(std::string_view refreshToken)
     std::string token(refreshToken);
     if (token.empty())
     {
-        const auto current = impl_->snapshot();
+        const auto current = m_impl->snapshot();
         if (!current || current->refresh_token.empty())
             return makeError(errc::NoSession, "no session to refresh");
         token = current->refresh_token;
     }
-    return impl_->refresh(token);
+    return m_impl->refresh(token);
 }
 
 Result<Session> AuthClient::setSession(Session session)
 {
     if (session.access_token.empty())
         return makeError(errc::InvalidArgument, "access_token is required");
-    impl_->store(session, AuthEvent::SignedIn);
+    m_impl->store(session, AuthEvent::SignedIn);
     return session;
 }
 
 Result<void> AuthClient::signOut(SignOutScope scope)
 {
-    const auto current = impl_->snapshot();
+    const auto current = m_impl->snapshot();
     Result<void> outcome;
     if (current)
     {
-        auto reply = impl_->call(
+        auto reply = m_impl->call(
             http::Method::Post,
             scope == SignOutScope::Local ? "/auth/v1/logout?scope=local" : "/auth/v1/logout",
             nullptr,
@@ -463,16 +464,16 @@ Result<void> AuthClient::signOut(SignOutScope scope)
         if (!reply && reply.error().status != 401 && reply.error().status != 403 && reply.error().status != 404)
             outcome = reply.error();
     }
-    impl_->clear();
+    m_impl->clear();
     return outcome;
 }
 
 Result<User> AuthClient::getUser()
 {
-    const auto current = impl_->freshSession();
+    const auto current = m_impl->freshSession();
     if (!current)
         return makeError(errc::NoSession, "no active session", 401);
-    auto reply = impl_->call(http::Method::Get, "/auth/v1/user", nullptr, current->access_token);
+    auto reply = m_impl->call(http::Method::Get, "/auth/v1/user", nullptr, current->access_token);
     if (!reply)
         return reply.error();
     return reply.value().get<User>();
@@ -480,7 +481,7 @@ Result<User> AuthClient::getUser()
 
 Result<User> AuthClient::updateUser(const UserAttributes& attributes)
 {
-    const auto current = impl_->freshSession();
+    const auto current = m_impl->freshSession();
     if (!current)
         return makeError(errc::NoSession, "no active session", 401);
     Json body = Json::object();
@@ -493,14 +494,14 @@ Result<User> AuthClient::updateUser(const UserAttributes& attributes)
     if (!attributes.data.is_null())
         body["data"] = attributes.data;
 
-    auto reply = impl_->call(http::Method::Put, "/auth/v1/user", &body, current->access_token);
+    auto reply = m_impl->call(http::Method::Put, "/auth/v1/user", &body, current->access_token);
     if (!reply)
         return reply.error();
     auto user = reply.value().get<User>();
 
     Session updated = *current;
     updated.user    = user;
-    impl_->store(updated, AuthEvent::UserUpdated);
+    m_impl->store(updated, AuthEvent::UserUpdated);
     return user;
 }
 
@@ -509,26 +510,26 @@ Result<void> AuthClient::resetPasswordForEmail(std::string_view email, std::stri
     if (email.empty())
         return makeError(errc::InvalidArgument, "email is required");
     const Json body = { { "email", std::string(email) } };
-    auto reply      = impl_->call(http::Method::Post, withRedirect("/auth/v1/recover", redirectTo), &body, {});
+    auto reply      = m_impl->call(http::Method::Post, withRedirect("/auth/v1/recover", redirectTo), &body, {});
     if (!reply)
         return reply.error();
     return {};
 }
 
-std::optional<Session> AuthClient::getSession() { return impl_->freshSession(); }
+std::optional<Session> AuthClient::getSession() { return m_impl->freshSession(); }
 
 Subscription AuthClient::onAuthStateChange(AuthCallback callback)
 {
     int id = 0;
     {
-        const std::lock_guard lock(impl_->mutex);
-        id = impl_->nextListener++;
-        impl_->listeners.emplace(id, callback);
+        const std::lock_guard lock(m_impl->mutex);
+        id = m_impl->nextListener++;
+        m_impl->listeners.emplace(id, callback);
     }
-    callback(AuthEvent::InitialSession, impl_->snapshot());
+    callback(AuthEvent::InitialSession, m_impl->snapshot());
 
     return Subscription(
-        [weak = std::weak_ptr<Impl>(impl_), id]
+        [weak = std::weak_ptr<Impl>(m_impl), id]
         {
             if (const auto impl = weak.lock())
             {
@@ -620,21 +621,21 @@ namespace
 AuthClient::Mfa AuthClient::mfa() const
 {
     Mfa out;
-    out.impl_ = impl_;
+    out.m_impl = m_impl;
     return out;
 }
 
 AuthClient::Admin AuthClient::admin(std::string serviceRoleKey) const
 {
     Admin out;
-    out.impl_       = impl_;
-    out.serviceKey_ = std::move(serviceRoleKey);
+    out.m_impl       = m_impl;
+    out.m_serviceKey = std::move(serviceRoleKey);
     return out;
 }
 
 Result<MfaEnrollResponse> AuthClient::Mfa::enroll(const MfaEnrollParams& params)
 {
-    const auto current = impl_->freshSession();
+    const auto current = m_impl->freshSession();
     if (!current)
         return makeError(errc::NoSession, "no active session", 401);
     Json body = { { "factor_type", params.factorType } };
@@ -642,7 +643,7 @@ Result<MfaEnrollResponse> AuthClient::Mfa::enroll(const MfaEnrollParams& params)
     putIfSet(body, "issuer", params.issuer);
     putIfSet(body, "phone", params.phone);
 
-    auto reply = impl_->call(http::Method::Post, "/auth/v1/factors", &body, current->access_token);
+    auto reply = m_impl->call(http::Method::Post, "/auth/v1/factors", &body, current->access_token);
     if (!reply)
         return reply.error();
     MfaEnrollResponse out;
@@ -660,14 +661,14 @@ Result<MfaChallenge> AuthClient::Mfa::challenge(std::string_view factorId, std::
 {
     if (factorId.empty())
         return makeError(errc::InvalidArgument, "factor id is required");
-    const auto current = impl_->freshSession();
+    const auto current = m_impl->freshSession();
     if (!current)
         return makeError(errc::NoSession, "no active session", 401);
     Json body = Json::object();
     if (!channel.empty())
         body["channel"] = std::string(channel);
 
-    auto reply = impl_->call(http::Method::Post, idPath("/auth/v1/factors/", factorId, "/challenge"), &body, current->access_token);
+    auto reply = m_impl->call(http::Method::Post, idPath("/auth/v1/factors/", factorId, "/challenge"), &body, current->access_token);
     if (!reply)
         return reply.error();
     return MfaChallenge { str(reply.value(), "id"), integer(reply.value(), "expires_at") };
@@ -677,12 +678,12 @@ Result<Session> AuthClient::Mfa::verify(std::string_view factorId, std::string_v
 {
     if (factorId.empty() || challengeId.empty() || code.empty())
         return makeError(errc::InvalidArgument, "factor id, challenge id and code are required");
-    const auto current = impl_->freshSession();
+    const auto current = m_impl->freshSession();
     if (!current)
         return makeError(errc::NoSession, "no active session", 401);
     const Json body = { { "challenge_id", std::string(challengeId) }, { "code", std::string(code) } };
 
-    auto reply = impl_->call(http::Method::Post, idPath("/auth/v1/factors/", factorId, "/verify"), &body, current->access_token);
+    auto reply = m_impl->call(http::Method::Post, idPath("/auth/v1/factors/", factorId, "/verify"), &body, current->access_token);
     if (!reply)
         return reply.error();
     auto next = reply.value().get<Session>();
@@ -690,7 +691,7 @@ Result<Session> AuthClient::Mfa::verify(std::string_view factorId, std::string_v
         return makeError(errc::Parse, "verify response had no access_token");
     if (next.user.id.empty())
         next.user = current->user;
-    impl_->store(next, AuthEvent::MfaChallengeVerified);
+    m_impl->store(next, AuthEvent::MfaChallengeVerified);
     return next;
 }
 
@@ -706,10 +707,10 @@ Result<std::string> AuthClient::Mfa::unenroll(std::string_view factorId)
 {
     if (factorId.empty())
         return makeError(errc::InvalidArgument, "factor id is required");
-    const auto current = impl_->freshSession();
+    const auto current = m_impl->freshSession();
     if (!current)
         return makeError(errc::NoSession, "no active session", 401);
-    auto reply = impl_->call(http::Method::Delete, idPath("/auth/v1/factors/", factorId), nullptr, current->access_token);
+    auto reply = m_impl->call(http::Method::Delete, idPath("/auth/v1/factors/", factorId), nullptr, current->access_token);
     if (!reply)
         return reply.error();
     return str(reply.value(), "id");
@@ -717,10 +718,10 @@ Result<std::string> AuthClient::Mfa::unenroll(std::string_view factorId)
 
 Result<MfaFactors> AuthClient::Mfa::listFactors()
 {
-    const auto current = impl_->freshSession();
+    const auto current = m_impl->freshSession();
     if (!current)
         return makeError(errc::NoSession, "no active session", 401);
-    auto reply = impl_->call(http::Method::Get, "/auth/v1/user", nullptr, current->access_token);
+    auto reply = m_impl->call(http::Method::Get, "/auth/v1/user", nullptr, current->access_token);
     if (!reply)
         return reply.error();
     MfaFactors out;
@@ -743,7 +744,7 @@ Result<MfaFactors> AuthClient::Mfa::listFactors()
 
 Result<AuthenticatorAssuranceLevel> AuthClient::Mfa::getAuthenticatorAssuranceLevel()
 {
-    const auto current = impl_->freshSession();
+    const auto current = m_impl->freshSession();
     if (!current)
         return makeError(errc::NoSession, "no active session", 401);
     const Json payload = jwtPayload(current->access_token);
@@ -781,7 +782,7 @@ Result<AuthenticatorAssuranceLevel> AuthClient::Mfa::getAuthenticatorAssuranceLe
 Result<AdminListUsersResponse> AuthClient::Admin::listUsers(const AdminListUsersParams& params)
 {
     const std::string path = "/auth/v1/admin/users?page=" + std::to_string(params.page) + "&per_page=" + std::to_string(params.perPage);
-    auto reply             = impl_->call(http::Method::Get, path, nullptr, serviceKey_);
+    auto reply             = m_impl->call(http::Method::Get, path, nullptr, m_serviceKey);
     if (!reply)
         return reply.error();
     AdminListUsersResponse out;
@@ -800,7 +801,7 @@ Result<User> AuthClient::Admin::getUserById(std::string_view id)
 {
     if (id.empty())
         return makeError(errc::InvalidArgument, "user id is required");
-    auto reply = impl_->call(http::Method::Get, idPath("/auth/v1/admin/users/", id), nullptr, serviceKey_);
+    auto reply = m_impl->call(http::Method::Get, idPath("/auth/v1/admin/users/", id), nullptr, m_serviceKey);
     if (!reply)
         return reply.error();
     return reply.value().get<User>();
@@ -809,7 +810,7 @@ Result<User> AuthClient::Admin::getUserById(std::string_view id)
 Result<User> AuthClient::Admin::createUser(const AdminCreateUserAttributes& attributes)
 {
     const Json body = adminAttributes(attributes);
-    auto reply      = impl_->call(http::Method::Post, "/auth/v1/admin/users", &body, serviceKey_);
+    auto reply      = m_impl->call(http::Method::Post, "/auth/v1/admin/users", &body, m_serviceKey);
     if (!reply)
         return reply.error();
     return reply.value().get<User>();
@@ -820,7 +821,7 @@ Result<User> AuthClient::Admin::updateUserById(std::string_view id, const AdminC
     if (id.empty())
         return makeError(errc::InvalidArgument, "user id is required");
     const Json body = adminAttributes(attributes);
-    auto reply      = impl_->call(http::Method::Put, idPath("/auth/v1/admin/users/", id), &body, serviceKey_);
+    auto reply      = m_impl->call(http::Method::Put, idPath("/auth/v1/admin/users/", id), &body, m_serviceKey);
     if (!reply)
         return reply.error();
     return reply.value().get<User>();
@@ -831,7 +832,7 @@ Result<void> AuthClient::Admin::deleteUser(std::string_view id, bool shouldSoftD
     if (id.empty())
         return makeError(errc::InvalidArgument, "user id is required");
     const Json body = { { "should_soft_delete", shouldSoftDelete } };
-    auto reply      = impl_->call(http::Method::Delete, idPath("/auth/v1/admin/users/", id), &body, serviceKey_);
+    auto reply      = m_impl->call(http::Method::Delete, idPath("/auth/v1/admin/users/", id), &body, m_serviceKey);
     if (!reply)
         return reply.error();
     return {};
@@ -844,7 +845,7 @@ Result<User> AuthClient::Admin::inviteUserByEmail(std::string_view email, std::s
     Json body = { { "email", std::string(email) } };
     if (data.is_object())
         body["data"] = data;
-    auto reply = impl_->call(http::Method::Post, withRedirect("/auth/v1/invite", redirectTo), &body, serviceKey_);
+    auto reply = m_impl->call(http::Method::Post, withRedirect("/auth/v1/invite", redirectTo), &body, m_serviceKey);
     if (!reply)
         return reply.error();
     return reply.value().get<User>();
@@ -861,7 +862,7 @@ Result<AdminGenerateLinkResponse> AuthClient::Admin::generateLink(const AdminGen
     if (params.data.is_object())
         body["data"] = params.data;
 
-    auto reply = impl_->call(http::Method::Post, "/auth/v1/admin/generate_link", &body, serviceKey_);
+    auto reply = m_impl->call(http::Method::Post, "/auth/v1/admin/generate_link", &body, m_serviceKey);
     if (!reply)
         return reply.error();
     AdminGenerateLinkResponse out;
@@ -877,7 +878,7 @@ Result<void> AuthClient::Admin::signOut(std::string_view jwt)
 {
     if (jwt.empty())
         return makeError(errc::InvalidArgument, "jwt is required");
-    auto reply = impl_->call(http::Method::Post, "/auth/v1/logout?scope=global", nullptr, std::string(jwt));
+    auto reply = m_impl->call(http::Method::Post, "/auth/v1/logout?scope=global", nullptr, std::string(jwt));
     if (!reply)
         return reply.error();
     return {};

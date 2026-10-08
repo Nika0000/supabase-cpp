@@ -25,16 +25,16 @@ namespace
     }
 }
 
-FunctionsClient::FunctionsClient(std::shared_ptr<const Context> ctx) : ctx_(std::move(ctx)) {}
+FunctionsClient::FunctionsClient(std::shared_ptr<const Context> ctx) : m_ctx(std::move(ctx)) {}
 
 http::Request FunctionsClient::build(std::string_view name, const InvokeOptions& options) const
 {
     http::Request request;
     request.method  = options.method;
-    request.url     = ctx_->endpoint("/functions/v1/") + std::string(name);
-    request.timeout = ctx_->timeout;
+    request.url     = m_ctx->endpoint("/functions/v1/") + std::string(name);
+    request.timeout = m_ctx->timeout;
     request.cancel  = options.cancel;
-    request.headers = ctx_->baseHeaders();
+    request.headers = m_ctx->baseHeaders();
     if (!options.region.empty())
         request.headers.emplace_back("x-region", options.region);
 
@@ -54,7 +54,7 @@ http::Request FunctionsClient::build(std::string_view name, const InvokeOptions&
 
 Result<FunctionResponse> FunctionsClient::invoke(std::string_view name, const InvokeOptions& options) const
 {
-    auto sent = ctx_->transport->send(build(name, options));
+    auto sent = m_ctx->transport->send(build(name, options));
     if (!sent)
         return sent.error();
     http::Response& response = sent.value();
@@ -67,7 +67,7 @@ Result<int> FunctionsClient::invokeStream(std::string_view name, const InvokeOpt
 {
     if (!onChunk)
         return makeError(errc::InvalidArgument, "onChunk is required");
-    auto sent = ctx_->transport->send(build(name, options), std::move(onChunk));
+    auto sent = m_ctx->transport->send(build(name, options), std::move(onChunk));
     if (!sent)
         return sent.error();
     if (!sent.value().ok())

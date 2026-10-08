@@ -20,14 +20,14 @@ namespace supabase
 class SchemaClient
 {
   public:
-    explicit SchemaClient(std::shared_ptr<const Context> ctx) : ctx_(std::move(ctx)) {}
+    explicit SchemaClient(std::shared_ptr<const Context> ctx) : m_ctx(std::move(ctx)) {}
 
     [[nodiscard]] postgrest::QueryBuilder from(std::string_view table) const;
     [[nodiscard]] postgrest::FilterBuilder
     rpc(std::string_view fn, const Json& args = Json::object(), postgrest::RpcOptions options = {}) const;
 
   private:
-    std::shared_ptr<const Context> ctx_;
+    std::shared_ptr<const Context> m_ctx;
 };
 
 /// Supabase client. Mirrors supabase-js `SupabaseClient`. Cheap to move; sub-clients share state.
@@ -46,25 +46,25 @@ class Client
     [[nodiscard]] postgrest::FilterBuilder
     rpc(std::string_view fn, const Json& args = Json::object(), postgrest::RpcOptions options = {}) const;
 
-    [[nodiscard]] auth::AuthClient& auth() { return *auth_; }
-    [[nodiscard]] const functions::FunctionsClient& functions() const { return functions_; }
-    [[nodiscard]] const storage::StorageClient& storage() const { return storage_; }
-    [[nodiscard]] const realtime::RealtimeClient& realtime() const { return realtime_; }
-    [[nodiscard]] const graphql::GraphQLClient& graphql() const { return graphql_; }
+    [[nodiscard]] auth::AuthClient& auth() { return *m_auth; }
+    [[nodiscard]] const functions::FunctionsClient& functions() const { return m_functions; }
+    [[nodiscard]] const storage::StorageClient& storage() const { return m_storage; }
+    [[nodiscard]] const realtime::RealtimeClient& realtime() const { return m_realtime; }
+    [[nodiscard]] const graphql::GraphQLClient& graphql() const { return m_graphql; }
 
   private:
-    std::shared_ptr<Context> ctx_;
-    std::unique_ptr<auth::AuthClient> auth_;
-    functions::FunctionsClient functions_;
-    storage::StorageClient storage_;
-    realtime::RealtimeClient realtime_;
-    graphql::GraphQLClient graphql_;
+    std::shared_ptr<Context> m_ctx;
+    std::unique_ptr<auth::AuthClient> m_auth;
+    functions::FunctionsClient m_functions;
+    storage::StorageClient m_storage;
+    realtime::RealtimeClient m_realtime;
+    graphql::GraphQLClient m_graphql;
 };
 
 /// supabase-js style factory.
 [[nodiscard]] inline Client createClient(std::string url, std::string anonKey, ClientOptions options = {})
 {
-    return Client(std::move(url), std::move(anonKey), std::move(options));
+    return { std::move(url), std::move(anonKey), std::move(options) };
 }
 
 }

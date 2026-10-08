@@ -1,4 +1,3 @@
-#include <cctype>
 
 #include <supabase/postgrest/builder.hpp> // urlEncode
 #include <supabase/storage/storage.hpp>
@@ -165,7 +164,7 @@ namespace
         return query;
     }
 
-    Result<void> discard(Result<http::Response> response)
+    Result<void> discard(const Result<http::Response>& response)
     {
         if (!response)
             return response.error();
@@ -173,19 +172,21 @@ namespace
     }
 }
 
-StorageFileApi::StorageFileApi(std::shared_ptr<const Context> ctx, std::string bucket) : ctx_(std::move(ctx)), bucket_(std::move(bucket)) {}
+StorageFileApi::StorageFileApi(std::shared_ptr<const Context> ctx, std::string bucket) : m_ctx(std::move(ctx)), m_bucket(std::move(bucket))
+{
+}
 
 Result<UploadResult>
 StorageFileApi::put(http::Method method, std::string_view path, std::string_view data, const FileOptions& options) const
 {
     const std::string key = std::string(path);
-    http::Request request = makeRequest(*ctx_, method, "/object/" + postgrest::urlEncode(bucket_) + "/" + encodePath(key));
+    http::Request request = makeRequest(*m_ctx, method, "/object/" + postgrest::urlEncode(m_bucket) + "/" + encodePath(key));
     request.headers.emplace_back("Content-Type", options.contentType);
     request.headers.emplace_back("cache-control", "max-age=" + options.cacheControl);
     request.headers.emplace_back("x-upsert", options.upsert ? "true" : "false");
     request.body = std::string(data);
 
-    auto response = run(*ctx_, std::move(request), options.cancel);
+    auto response = run(*m_ctx, std::move(request), options.cancel);
     if (!response)
         return response.error();
     const Json body = Json::parse(response.value().body, nullptr, false);
@@ -197,7 +198,7 @@ StorageFileApi::put(http::Method method, std::string_view path, std::string_view
         result.fullPath = str(body, "Key");
     }
     if (result.fullPath.empty())
-        result.fullPath = bucket_ + "/" + key;
+        result.fullPath = m_bucket + "/" + key;
     return result;
 }
 
@@ -214,11 +215,11 @@ Result<UploadResult> StorageFileApi::update(std::string_view path, std::string_v
 Result<std::string> StorageFileApi::download(std::string_view path, const TransformOptions* transform) const
 {
     std::string route = transform ? "/render/image/authenticated/" : "/object/";
-    route += postgrest::urlEncode(bucket_) + "/" + encodePath(path);
+    route += postgrest::urlEncode(m_bucket) + "/" + encodePath(path);
     if (transform)
         route += transformQuery(*transform);
 
-    auto response = run(*ctx_, makeRequest(*ctx_, http::Method::Get, route));
+    auto response = run(*m_ctx, makeRequest(*m_ctx, http::Method::Get, route));
     if (!response)
         return response.error();
     return std::move(response.value().body);
@@ -227,7 +228,7 @@ Result<std::string> StorageFileApi::download(std::string_view path, const Transf
 Result<std::vector<FileObject>> StorageFileApi::remove(const std::vector<std::string>& paths) const
 {
     auto response
-        = run(*ctx_, jsonRequest(*ctx_, http::Method::Delete, "/object/" + postgrest::urlEncode(bucket_), { { "prefixes", paths } }));
+        = run(*m_ctx, jsonRequest(*m_ctx, http::Method::Delete, "/object/" + postgrest::urlEncode(m_bucket), { { "prefixes", paths } }));
     if (!response)
         return response.error();
     return toFileObjects(response.value());
@@ -235,12 +236,15 @@ Result<std::vector<FileObject>> StorageFileApi::remove(const std::vector<std::st
 
 Result<std::vector<FileObject>> StorageFileApi::list(std::string_view folder, const ListOptions& options) const
 {
-    const Json payload = { { "prefix", std::string(folder) },
-                           { "limit", options.limit },
-                           { "offset", options.offset },
-                           { "sortBy", { { "column", options.sortColumn }, { "order", options.ascending ? "asc" : "desc" } } },
-                           { "search", options.search } };
-    auto response      = run(*ctx_, jsonRequest(*ctx_, http::Method::Post, "/object/list/" + postgrest::urlEncode(bucket_), payload));
+    const Json payload = {
+        { "prefix", std::string(folder) },
+        { "limit", options.limit },
+        { "offset", options.offset },
+        { "sortBy", { { "column", options.sortColumn }, { "order", options.ascending ? "asc" : "desc" } } },
+        { "search", options.search },
+    };
+
+    auto response = run(*m_ctx, jsonRequest(*m_ctx, http::Method::Post, "/object/list/" + postgrest::urlEncode(m_bucket), payload));
     if (!response)
         return response.error();
     return toFileObjects(response.value());
@@ -248,25 +252,25 @@ Result<std::vector<FileObject>> StorageFileApi::list(std::string_view folder, co
 
 Result<void> StorageFileApi::move(std::string_view from, std::string_view to) const
 {
-    const Json payload = { { "bucketId", bucket_ }, { "sourceKey", std::string(from) }, { "destinationKey", std::string(to) } };
-    return discard(run(*ctx_, jsonRequest(*ctx_, http::Method::Post, "/object/move", payload)));
+    const Json payload = { { "bucketId", m_bucket }, { "sourceKey", std::string(from) }, { "destinationKey", std::string(to) } };
+    return discard(run(*m_ctx, jsonRequest(*m_ctx, http::Method::Post, "/object/move", payload)));
 }
 
 Result<void> StorageFileApi::copy(std::string_view from, std::string_view to) const
 {
-    const Json payload = { { "bucketId", bucket_ }, { "sourceKey", std::string(from) }, { "destinationKey", std::string(to) } };
-    return discard(run(*ctx_, jsonRequest(*ctx_, http::Method::Post, "/object/copy", payload)));
+    const Json payload = { { "bucketId", m_bucket }, { "sourceKey", std::string(from) }, { "destinationKey", std::string(to) } };
+    return discard(run(*m_ctx, jsonRequest(*m_ctx, http::Method::Post, "/object/copy", payload)));
 }
 
 Result<SignedUrl> StorageFileApi::createSignedUrl(std::string_view path, int expiresInSeconds) const
 {
     const std::string key = std::string(path);
     auto response         = run(
-        *ctx_,
+        *m_ctx,
         jsonRequest(
-            *ctx_,
+            *m_ctx,
             http::Method::Post,
-            "/object/sign/" + postgrest::urlEncode(bucket_) + "/" + encodePath(key),
+            "/object/sign/" + postgrest::urlEncode(m_bucket) + "/" + encodePath(key),
             { { "expiresIn", expiresInSeconds } }
         )
     );
@@ -278,17 +282,17 @@ Result<SignedUrl> StorageFileApi::createSignedUrl(std::string_view path, int exp
     const std::string relative = body.value().is_object() ? str(body.value(), "signedURL") : std::string();
     if (relative.empty())
         return makeError(errc::Parse, "missing signedURL in storage response", response.value().status);
-    return SignedUrl { key, ctx_->endpoint(kRoot) + relative };
+    return SignedUrl { key, m_ctx->endpoint(kRoot) + relative };
 }
 
 Result<std::vector<SignedUrl>> StorageFileApi::createSignedUrls(const std::vector<std::string>& paths, int expiresInSeconds) const
 {
     auto response = run(
-        *ctx_,
+        *m_ctx,
         jsonRequest(
-            *ctx_,
+            *m_ctx,
             http::Method::Post,
-            "/object/sign/" + postgrest::urlEncode(bucket_),
+            "/object/sign/" + postgrest::urlEncode(m_bucket),
             { { "expiresIn", expiresInSeconds }, { "paths", paths } }
         )
     );
@@ -303,7 +307,7 @@ Result<std::vector<SignedUrl>> StorageFileApi::createSignedUrls(const std::vecto
         for (const auto& item : body.value())
         {
             const std::string relative = str(item, "signedURL");
-            urls.push_back({ str(item, "path"), relative.empty() ? std::string() : ctx_->endpoint(kRoot) + relative });
+            urls.push_back({ str(item, "path"), relative.empty() ? std::string() : m_ctx->endpoint(kRoot) + relative });
         }
     }
     return urls;
@@ -311,19 +315,19 @@ Result<std::vector<SignedUrl>> StorageFileApi::createSignedUrls(const std::vecto
 
 std::string StorageFileApi::getPublicUrl(std::string_view path, bool download) const
 {
-    std::string url = ctx_->endpoint(kRoot) + "/object/public/" + postgrest::urlEncode(bucket_) + "/" + encodePath(path);
+    std::string url = m_ctx->endpoint(kRoot) + "/object/public/" + postgrest::urlEncode(m_bucket) + "/" + encodePath(path);
     if (download)
         url += "?download=";
     return url;
 }
 
-StorageClient::StorageClient(std::shared_ptr<const Context> ctx) : ctx_(std::move(ctx)) {}
+StorageClient::StorageClient(std::shared_ptr<const Context> ctx) : m_ctx(std::move(ctx)) {}
 
-StorageFileApi StorageClient::from(std::string_view bucket) const { return StorageFileApi(ctx_, std::string(bucket)); }
+StorageFileApi StorageClient::from(std::string_view bucket) const { return StorageFileApi(m_ctx, std::string(bucket)); }
 
 Result<std::vector<Bucket>> StorageClient::listBuckets() const
 {
-    auto response = run(*ctx_, makeRequest(*ctx_, http::Method::Get, "/bucket"));
+    auto response = run(*m_ctx, makeRequest(*m_ctx, http::Method::Get, "/bucket"));
     if (!response)
         return response.error();
     auto body = parseBody(response.value());
@@ -340,7 +344,7 @@ Result<std::vector<Bucket>> StorageClient::listBuckets() const
 
 Result<Bucket> StorageClient::getBucket(std::string_view id) const
 {
-    auto response = run(*ctx_, makeRequest(*ctx_, http::Method::Get, "/bucket/" + postgrest::urlEncode(id)));
+    auto response = run(*m_ctx, makeRequest(*m_ctx, http::Method::Get, "/bucket/" + postgrest::urlEncode(id)));
     if (!response)
         return response.error();
     auto body = parseBody(response.value());
@@ -354,22 +358,22 @@ Result<void> StorageClient::createBucket(std::string_view id, const BucketOption
     Json body    = bucketBody(options);
     body["id"]   = std::string(id);
     body["name"] = std::string(id);
-    return discard(run(*ctx_, jsonRequest(*ctx_, http::Method::Post, "/bucket", body)));
+    return discard(run(*m_ctx, jsonRequest(*m_ctx, http::Method::Post, "/bucket", body)));
 }
 
 Result<void> StorageClient::updateBucket(std::string_view id, const BucketOptions& options) const
 {
-    return discard(run(*ctx_, jsonRequest(*ctx_, http::Method::Put, "/bucket/" + postgrest::urlEncode(id), bucketBody(options))));
+    return discard(run(*m_ctx, jsonRequest(*m_ctx, http::Method::Put, "/bucket/" + postgrest::urlEncode(id), bucketBody(options))));
 }
 
 Result<void> StorageClient::emptyBucket(std::string_view id) const
 {
-    return discard(run(*ctx_, jsonRequest(*ctx_, http::Method::Post, "/bucket/" + postgrest::urlEncode(id) + "/empty", Json::object())));
+    return discard(run(*m_ctx, jsonRequest(*m_ctx, http::Method::Post, "/bucket/" + postgrest::urlEncode(id) + "/empty", Json::object())));
 }
 
 Result<void> StorageClient::deleteBucket(std::string_view id) const
 {
-    return discard(run(*ctx_, makeRequest(*ctx_, http::Method::Delete, "/bucket/" + postgrest::urlEncode(id))));
+    return discard(run(*m_ctx, makeRequest(*m_ctx, http::Method::Delete, "/bucket/" + postgrest::urlEncode(id))));
 }
 
 }

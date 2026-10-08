@@ -1,0 +1,6 @@
+# Give this standalone header its own C++20 fallback instead of a sibling project's compile command.
+If:
+  PathMatch: include/supabase/http\.hpp
+CompileFlags:
+  CompilationDatabase: None
+  Add: [-std=c++20, -I..]

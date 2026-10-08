@@ -6,7 +6,6 @@
 #include <supabase/json.hpp>
 #include <supabase/result.hpp>
 
-#include <initializer_list>
 #include <memory>
 #include <optional>
 #include <string>
@@ -132,17 +131,17 @@ class FilterBuilder
   private:
     FilterBuilder& addFilter(std::string_view column, std::string_view op, std::string_view value);
 
-    std::shared_ptr<const Context> ctx_;
-    std::string path_;
-    http::Method method_;
-    std::vector<std::pair<std::string, std::string>> params_;
-    std::vector<std::string> prefer_;
-    std::optional<Json> body_;
-    std::string select_;
-    std::optional<std::pair<std::int64_t, std::int64_t>> range_;
-    CountMode count_  = CountMode::None;
-    bool single_      = false;
-    bool maybeSingle_ = false;
+    std::shared_ptr<const Context> m_ctx;
+    std::string m_path;
+    http::Method m_method;
+    std::vector<std::pair<std::string, std::string>> m_params;
+    std::vector<std::string> m_prefer;
+    std::optional<Json> m_body;
+    std::string m_select;
+    std::optional<std::pair<std::int64_t, std::int64_t>> m_range;
+    CountMode m_count  = CountMode::None;
+    bool m_single      = false;
+    bool m_maybeSingle = false;
 };
 
 /// Entry point returned by `Client::from(table)`.
@@ -158,8 +157,8 @@ class QueryBuilder
     [[nodiscard]] FilterBuilder remove(WriteOptions options = {}) const; ///< supabase-js `delete`
 
   private:
-    std::shared_ptr<const Context> ctx_;
-    std::string table_;
+    std::shared_ptr<const Context> m_ctx;
+    std::string m_table;
 };
 
 /// Builder for `client.rpc(fn, args)`.

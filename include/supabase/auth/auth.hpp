@@ -228,7 +228,7 @@ class MemorySessionStorage final : public SessionStorage
     void clear() override;
 
   private:
-    std::optional<std::string> value_;
+    std::optional<std::string> m_value;
 };
 
 /// RAII handle returned by `onAuthStateChange`; unsubscribes on destruction.
@@ -246,7 +246,7 @@ class Subscription
     void unsubscribe();
 
   private:
-    std::function<void()> unsubscribe_;
+    std::function<void()> m_unsubscribe;
 };
 
 /// GoTrue client. Mirrors supabase-js `auth`. Thread-safe.
@@ -298,7 +298,7 @@ class AuthClient
 
       private:
         friend class AuthClient;
-        std::shared_ptr<Impl> impl_;
+        std::shared_ptr<Impl> m_impl;
     };
 
     /// GoTrue admin API. Needs the service-role key; never ship that key in a client app.
@@ -316,15 +316,15 @@ class AuthClient
 
       private:
         friend class AuthClient;
-        std::shared_ptr<Impl> impl_;
-        std::string serviceKey_;
+        std::shared_ptr<Impl> m_impl;
+        std::string m_serviceKey;
     };
 
     [[nodiscard]] Mfa mfa() const;
     [[nodiscard]] Admin admin(std::string serviceRoleKey) const;
 
   private:
-    std::shared_ptr<Impl> impl_;
+    std::shared_ptr<Impl> m_impl;
 };
 
 }

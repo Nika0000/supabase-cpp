@@ -1,7 +1,5 @@
 #include <curl/curl.h>
 
-#include <cctype>
-
 #include <supabase/http.hpp>
 
 #include <algorithm>
@@ -15,8 +13,8 @@ namespace
 {
     void ensureCurlGlobalInit()
     {
-        static const bool initialized = (curl_global_init(CURL_GLOBAL_DEFAULT), true);
-        (void) initialized;
+        static const bool kInitialized = (curl_global_init(CURL_GLOBAL_DEFAULT), true);
+        (void) kInitialized;
     }
 
     struct Transfer
@@ -48,21 +46,32 @@ namespace
     {
         auto& transfer          = *static_cast<Transfer*>(user);
         const std::size_t bytes = size * count;
+
         std::string_view line(data, bytes);
         while (!line.empty() && (line.back() == '\r' || line.back() == '\n'))
+        {
             line.remove_suffix(1);
+        }
 
-        if (line.rfind("HTTP/", 0) == 0)
+        if (line.starts_with("HTTP/"))
         {
             transfer.response->headers.clear(); // new response block (redirect / 100-continue)
             return bytes;
         }
+
         const auto colon = line.find(':');
         if (colon == std::string_view::npos)
+        {
             return bytes;
+        }
+
         auto value = line.substr(colon + 1);
+
         while (!value.empty() && value.front() == ' ')
+        {
             value.remove_prefix(1);
+        }
+
         transfer.response->headers.emplace_back(std::string(line.substr(0, colon)), std::string(value));
         return bytes;
     }
@@ -80,12 +89,14 @@ namespace
     class CurlTransport final : public Transport
     {
       public:
-        explicit CurlTransport(CurlOptions options) : options_(std::move(options)) { ensureCurlGlobalInit(); }
+        explicit CurlTransport(CurlOptions options) : m_options(std::move(options)) { ensureCurlGlobalInit(); }
 
         ~CurlTransport() override
         {
-            for (CURL* handle : pool_)
+            for (CURL* handle : m_pool)
+            {
                 curl_easy_cleanup(handle);
+            }
         }
 
         CurlTransport(const CurlTransport&)            = delete;
@@ -94,7 +105,7 @@ namespace
         Result<Response> send(const Request& request, ChunkCallback onChunk) override
         {
             const bool canRetry = !onChunk && isIdempotent(request.method);
-            const int attempts  = 1 + (canRetry ? std::max<int>(0, options_.maxRetries) : 0);
+            const int attempts  = 1 + (canRetry ? std::max<int>(0, m_options.maxRetries) : 0);
 
             for (int attempt = 1;; ++attempt)
             {
@@ -113,11 +124,11 @@ namespace
         CURL* acquire()
         {
             {
-                const std::lock_guard lock(mutex_);
-                if (!pool_.empty())
+                const std::lock_guard lock(m_mutex);
+                if (!m_pool.empty())
                 {
-                    CURL* handle = pool_.back();
-                    pool_.pop_back();
+                    CURL* handle = m_pool.back();
+                    m_pool.pop_back();
                     return handle;
                 }
             }
@@ -126,9 +137,9 @@ namespace
 
         void release(CURL* handle)
         {
-            const std::lock_guard lock(mutex_);
-            if (pool_.size() < kMaxPooled)
-                pool_.push_back(handle);
+            const std::lock_guard lock(m_mutex);
+            if (m_pool.size() < kMaxPooled)
+                m_pool.push_back(handle);
             else
                 curl_easy_cleanup(handle);
         }
@@ -141,7 +152,7 @@ namespace
             curl_easy_reset(curl);
 
             Response response;
-            Transfer transfer { &response, &onChunk, &request.cancel, false };
+            Transfer transfer { .response = &response, .onChunk = &onChunk, .cancel = &request.cancel, .stoppedByCallback = false };
 
             curl_slist* headers = nullptr;
             for (const auto& [name, value] : request.headers)
@@ -152,29 +163,29 @@ namespace
 
             curl_easy_setopt(curl, CURLOPT_URL, request.url.c_str());
             curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-            curl_easy_setopt(curl, CURLOPT_USERAGENT, options_.userAgent.c_str());
+            curl_easy_setopt(curl, CURLOPT_USERAGENT, m_options.userAgent.c_str());
             curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
             curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
             curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, "");
             curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, static_cast<long>(request.timeout.count()));
-            curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, static_cast<long>(options_.connectTimeout.count()));
-            curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, options_.verifyPeer ? 1L : 0L);
-            curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, options_.verifyPeer ? 2L : 0L);
+            curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, static_cast<long>(m_options.connectTimeout.count()));
+            curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, m_options.verifyPeer ? 1L : 0L);
+            curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, m_options.verifyPeer ? 2L : 0L);
 #if LIBCURL_VERSION_NUM >= 0x074D00 // 7.77.0
-            if (!options_.caBundleBlob.empty())
+            if (!m_options.caBundleBlob.empty())
             {
                 curl_blob blob {};
-                blob.data  = const_cast<char*>(options_.caBundleBlob.data());
-                blob.len   = options_.caBundleBlob.size();
+                blob.data  = const_cast<char*>(m_options.caBundleBlob.data());
+                blob.len   = m_options.caBundleBlob.size();
                 blob.flags = CURL_BLOB_COPY;
                 curl_easy_setopt(curl, CURLOPT_CAINFO_BLOB, &blob);
             }
             else
 #endif
-                if (!options_.caBundle.empty())
-                curl_easy_setopt(curl, CURLOPT_CAINFO, options_.caBundle.c_str());
-            if (!options_.proxy.empty())
-                curl_easy_setopt(curl, CURLOPT_PROXY, options_.proxy.c_str());
+                if (!m_options.caBundle.empty())
+                curl_easy_setopt(curl, CURLOPT_CAINFO, m_options.caBundle.c_str());
+            if (!m_options.proxy.empty())
+                curl_easy_setopt(curl, CURLOPT_PROXY, m_options.proxy.c_str());
 
             if (request.method == Method::Head)
                 curl_easy_setopt(curl, CURLOPT_NOBODY, 1L);
@@ -222,9 +233,9 @@ namespace
 
         static constexpr std::size_t kMaxPooled = 8;
 
-        CurlOptions options_;
-        std::mutex mutex_;
-        std::vector<CURL*> pool_;
+        CurlOptions m_options;
+        std::mutex m_mutex;
+        std::vector<CURL*> m_pool;
     };
 }
 

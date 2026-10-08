@@ -11,7 +11,7 @@ namespace
 
 namespace graphql
 {
-    GraphQLClient::GraphQLClient(std::shared_ptr<const Context> ctx) : ctx_(std::move(ctx)) {}
+    GraphQLClient::GraphQLClient(std::shared_ptr<const Context> ctx) : m_ctx(std::move(ctx)) {}
     Result<Json> GraphQLClient::query(std::string_view, const Json&) const { return notImplemented("graphql.query"); }
 }
 

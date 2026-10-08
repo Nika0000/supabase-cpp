@@ -199,12 +199,14 @@ void realtimePostgresChanges(Client& client)
 {
     Latch subscribed, postgresReady, inserted;
     auto channel = client.realtime().channel("it-changes-" + uniqueSuffix());
-    channel->on("system", [&](const Json& status)
-                {
-                    if (status.value("extension", std::string {}) == "postgres_changes"
-                        && status.value("status", std::string {}) == "ok")
-                        postgresReady.set(status);
-                });
+    channel->on(
+        "system",
+        [&](const Json& status)
+        {
+            if (status.value("extension", std::string {}) == "postgres_changes" && status.value("status", std::string {}) == "ok")
+                postgresReady.set(status);
+        }
+    );
     channel->onPostgresChanges(
         { .event = "INSERT", .table = "todos" },
         [&](const Json& change)

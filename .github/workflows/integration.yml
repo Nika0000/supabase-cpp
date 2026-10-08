@@ -36,16 +36,22 @@ jobs:
           nohup supabase functions serve --no-verify-jwt > functions.log 2>&1 &
           sleep 10
 
+      # Distro libcurl is built without websockets (ws:// fails as an unsupported protocol); they are stable from 8.11.
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev nlohmann-json3-dev
+        run: |
+          sudo apt-get update && sudo apt-get install -y libssl-dev nlohmann-json3-dev
+          curl -fsSL https://curl.se/download/curl-8.11.1.tar.gz | tar xz -C "$RUNNER_TEMP"
+          cd "$RUNNER_TEMP/curl-8.11.1"
+          ./configure --prefix="$HOME/curl" --with-openssl --without-libpsl --without-brotli --without-zstd --disable-ldap --disable-docs --disable-manual
+          make -j"$(nproc)" && make install
 
       - name: Build
         run: |
-          cmake -B build -DSUPABASE_BUILD_INTEGRATION_TESTS=ON -DCMAKE_BUILD_TYPE=Release
+          cmake -B build -DSUPABASE_BUILD_INTEGRATION_TESTS=ON -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$HOME/curl"
           cmake --build build --target supabase_integration
 
       - name: Run integration tests
-        run: ./build/tests/integration/supabase_integration
+        run: LD_LIBRARY_PATH="$HOME/curl/lib" ./build/tests/integration/supabase_integration
 
       - name: Dump logs on failure
         if: failure()

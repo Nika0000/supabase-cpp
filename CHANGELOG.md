@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.0](https://github.com/Nika0000/supabase-cpp/compare/supabase-cpp-v0.5.0...supabase-cpp-v0.5.0) (2026-10-08)
+
+
+### Bug Fixes
+
+* format Realtime integration test ([a27ae4c](https://github.com/Nika0000/supabase-cpp/commit/a27ae4c77cdbde2d797458c568f54ff4e7a0d594))
+* wait for Postgres subscription in integration test ([8d3e6d3](https://github.com/Nika0000/supabase-cpp/commit/8d3e6d3327d8de02de7d5177a7acce09713095c2))
+
 ## 0.5.0 (2026-10-08)
 
 

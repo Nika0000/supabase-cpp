@@ -197,8 +197,14 @@ void functionsInvoke(Client& client)
 
 void realtimePostgresChanges(Client& client)
 {
-    Latch subscribed, inserted;
+    Latch subscribed, postgresReady, inserted;
     auto channel = client.realtime().channel("it-changes-" + uniqueSuffix());
+    channel->on("system", [&](const Json& status)
+                {
+                    if (status.value("extension", std::string {}) == "postgres_changes"
+                        && status.value("status", std::string {}) == "ok")
+                        postgresReady.set(status);
+                });
     channel->onPostgresChanges(
         { .event = "INSERT", .table = "todos" },
         [&](const Json& change)
@@ -213,11 +219,22 @@ void realtimePostgresChanges(Client& client)
     CHECK(subscribed.wait(15s));
     CHECK(subscribed.value()["status"] == static_cast<int>(realtime::SubscribeStatus::Subscribed));
     CHECK(channel->state() == realtime::ChannelState::Joined);
+    // A channel join can complete before Realtime has attached its Postgres subscription.
+    const bool ready = postgresReady.wait(30s);
+    CHECK(ready);
+    if (!ready)
+    {
+        auto left = client.realtime().removeChannel(channel);
+        CHECK_OK(left);
+        return;
+    }
 
     auto row = client.from("todos").insert(Json { { "title", "from-realtime" } }).select().single().execute();
     CHECK_OK(row);
-    CHECK(inserted.wait(15s));
-    CHECK(inserted.value()["eventType"] == "INSERT");
+    const bool received = inserted.wait(15s);
+    CHECK(received);
+    if (received)
+        CHECK(inserted.value()["eventType"] == "INSERT");
 
     if (row)
     {

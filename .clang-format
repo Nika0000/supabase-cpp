@@ -1,0 +1,33 @@
+---
+BasedOnStyle: WebKit
+AccessModifierOffset: -2
+AlignAfterOpenBracket: BlockIndent
+AlignConsecutiveAssignments:
+  Enabled: true
+AlignConsecutiveDeclarations:
+  PadOperators: true
+AlignOperands: true
+AlignTrailingComments: true
+BinPackArguments: false
+BinPackParameters: false
+BreakBeforeBraces: Allman
+BreakConstructorInitializers: BeforeColon
+SpaceInEmptyBlock: false
+ColumnLimit: 140
+IncludeBlocks: Regroup
+IncludeCategories:
+  - Regex: '^"(.+)"$'
+    Priority: 1
+  - Regex: '^<.*\.h>'
+    Priority: 2
+  - Regex: "^<c(.+)>$"
+    Priority: 3
+  - Regex: '^<.*\.hpp>$'
+    Priority: 4
+  - Regex: ".*"
+    Priority: 5
+IndentCaseLabels: true
+SortIncludes: true
+SortUsingDeclarations: true
+SpaceAfterCStyleCast: true
+Standard: c++20

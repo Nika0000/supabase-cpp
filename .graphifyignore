@@ -1,0 +1,10 @@
+# Generated and local files; keep include/, src/, tests/, and examples/.
+build*/
+vcpkg_installed/
+graphify-out/
+.git/
+.claude/
+.vs/
+.vscode/
+.idea/
+.env*

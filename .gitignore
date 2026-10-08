@@ -1,0 +1,9 @@
+build*/
+vcpkg_installed/
+.env
+.env.*
+.vs/
+.vscode/
+.idea/
+CMakeUserPresets.json
+graphify-out/

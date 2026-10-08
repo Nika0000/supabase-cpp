@@ -94,7 +94,7 @@ namespace
         Result<Response> send(const Request& request, ChunkCallback onChunk) override
         {
             const bool canRetry = !onChunk && isIdempotent(request.method);
-            const int attempts  = 1 + (canRetry ? std::max(0, options_.maxRetries) : 0);
+            const int attempts  = 1 + (canRetry ? std::max<int>(0, options_.maxRetries) : 0);
 
             for (int attempt = 1;; ++attempt)
             {

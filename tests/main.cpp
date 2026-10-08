@@ -526,6 +526,34 @@ void realtimeJoinErrorIsReported()
     CHECK(channel->state() == realtime::ChannelState::Errored);
 }
 
+void storageUploadAndSign()
+{
+    auto mock   = std::make_shared<MockTransport>();
+    auto client = makeClient(mock);
+    mock->reply(200, R"({"Id":"i1","Key":"b/dir/a b.txt"})");
+    mock->reply(200, R"({"signedURL":"/object/sign/b/dir/a%20b.txt?token=t"})");
+    mock->reply(409, R"({"message":"exists","statusCode":"409"})");
+
+    auto up = client.storage().from("b").upload("dir/a b.txt", "hi", { .upsert = true });
+    CHECK(up.ok());
+    CHECK(up.value().id == "i1");
+    const auto& request = mock->requests.at(0);
+    CHECK(request.method == http::Method::Post);
+    CHECK(request.url == "https://x.supabase.co/storage/v1/object/b/dir/a%20b.txt");
+    CHECK(request.body == "hi");
+    CHECK(headerOf(request, "x-upsert") == "true");
+
+    auto signedUrl = client.storage().from("b").createSignedUrl("dir/a b.txt", 60);
+    CHECK(signedUrl.ok());
+    CHECK(signedUrl.value().signedUrl == "https://x.supabase.co/storage/v1/object/sign/b/dir/a%20b.txt?token=t");
+
+    auto dup = client.storage().from("b").upload("x", "y");
+    CHECK(!dup.ok());
+    CHECK(dup.error().status == 409);
+    CHECK(dup.error().message == "exists");
+    CHECK(client.storage().from("b").getPublicUrl("a/b c") == "https://x.supabase.co/storage/v1/object/public/b/a/b%20c");
+}
+
 void stubsReportNotImplemented()
 {
     auto mock   = std::make_shared<MockTransport>();
@@ -552,6 +580,7 @@ int main()
     functionsInvoke();
     realtimeChannelLifecycle();
     realtimeJoinErrorIsReported();
+    storageUploadAndSign();
     stubsReportNotImplemented();
     std::printf(failures == 0 ? "ok\n" : "%d failure(s)\n", failures);
     return failures == 0 ? 0 : 1;

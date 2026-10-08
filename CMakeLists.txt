@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.16)
 project(supabase-cpp VERSION 0.5.0 LANGUAGES CXX) # x-release-please-version
 
 option(SUPABASE_BUILD_TESTS "Build supabase-cpp tests" OFF)
+option(SUPABASE_BUILD_INTEGRATION_TESTS "Build live-stack integration tests" OFF)
 option(SUPABASE_BUILD_EXAMPLES "Build supabase-cpp examples" OFF)
 
 if(NOT TARGET CURL::libcurl)
@@ -23,6 +24,10 @@ target_link_libraries(supabase PUBLIC nlohmann_json::nlohmann_json PRIVATE CURL:
 if(SUPABASE_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
+endif()
+
+if(SUPABASE_BUILD_INTEGRATION_TESTS)
+    add_subdirectory(tests/integration)
 endif()
 
 if(SUPABASE_BUILD_EXAMPLES)

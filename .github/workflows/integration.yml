@@ -1,0 +1,58 @@
+name: integration
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Start local Supabase
+        run: |
+          supabase init
+          mkdir -p supabase/migrations supabase/functions
+          cp -r tests/integration/supabase/migrations/. supabase/migrations/
+          cp -r tests/integration/supabase/functions/. supabase/functions/
+          supabase start -x imgproxy,studio,mailpit,logflare,vector,postgres-meta
+          supabase status -o env > status.env
+          {
+            echo "SUPABASE_URL=$(grep '^API_URL=' status.env | cut -d= -f2- | tr -d '"')"
+            echo "SUPABASE_ANON_KEY=$(grep '^ANON_KEY=' status.env | cut -d= -f2- | tr -d '"')"
+            echo "SUPABASE_SERVICE_KEY=$(grep '^SERVICE_ROLE_KEY=' status.env | cut -d= -f2- | tr -d '"')"
+          } >> "$GITHUB_ENV"
+
+      - name: Serve edge functions
+        run: |
+          nohup supabase functions serve --no-verify-jwt > functions.log 2>&1 &
+          sleep 10
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev nlohmann-json3-dev
+
+      - name: Build
+        run: |
+          cmake -B build -DSUPABASE_BUILD_INTEGRATION_TESTS=ON -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --target supabase_integration
+
+      - name: Run integration tests
+        run: ./build/tests/integration/supabase_integration
+
+      - name: Dump logs on failure
+        if: failure()
+        run: |
+          cat functions.log || true
+          for c in $(docker ps --format '{{.Names}}'); do echo "== $c =="; docker logs --tail 50 "$c" 2>&1; done
+
+      - name: Stop Supabase
+        if: always()
+        run: supabase stop --no-backup

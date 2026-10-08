@@ -10,7 +10,8 @@ A C++20 client for Supabase with an API shaped like `supabase-js`. It uses libcu
 | Auth | Sign-in, sign-up, OAuth URL and PKCE flows, session refresh, MFA, and admin operations |
 | Edge Functions | Invoke functions and stream responses |
 | Realtime | Postgres changes, broadcast, presence, reconnect, and channel rejoin |
-| Storage and GraphQL | Public API stubs; calls return `NotImplemented` |
+| Storage | Buckets, upload/update/download, list, move/copy, remove, signed and public URLs |
+| GraphQL | Public API stub; calls return `NotImplemented` |
 
 Realtime uses libcurl's WebSocket API and requires libcurl 7.86 or newer. With an older libcurl, WebSocket connection attempts return `NotImplemented`.
 

@@ -1,0 +1,9 @@
+{
+    "name": "supabase-cpp",
+    "version-string": "0.5.0",
+    "builtin-baseline": "2750401336fb7c95f6619657a46a7e798661341c",
+    "dependencies": [
+        "curl",
+        "nlohmann-json"
+    ]
+}

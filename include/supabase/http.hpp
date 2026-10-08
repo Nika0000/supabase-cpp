@@ -69,7 +69,7 @@ class Transport
 
 struct CurlOptions
 {
-    std::string caBundle; ///< PEM file path; empty uses curl's default store
+    std::string caBundle;     ///< PEM file path; empty uses curl's default store
     std::string caBundleBlob; ///< In-memory PEM data (needs curl >= 7.77); takes precedence over caBundle
     std::string userAgent = "supabase-cpp";
     std::string proxy;

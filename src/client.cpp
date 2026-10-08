@@ -10,14 +10,14 @@ namespace
         while (!url.empty() && url.back() == '/')
             url.pop_back();
 
-        auto ctx       = std::make_shared<Context>();
-        ctx->url       = std::move(url);
-        ctx->anonKey   = std::move(anonKey);
-        ctx->schema    = std::move(options.schema);
-        ctx->headers   = std::move(options.headers);
-        ctx->timeout   = options.timeout;
+        auto ctx           = std::make_shared<Context>();
+        ctx->url           = std::move(url);
+        ctx->anonKey       = std::move(anonKey);
+        ctx->schema        = std::move(options.schema);
+        ctx->headers       = std::move(options.headers);
+        ctx->timeout       = options.timeout;
         ctx->socketFactory = options.socketFactory ? std::move(options.socketFactory) : ws::makeCurlSocketFactory(options.curl);
-        ctx->transport = options.transport ? std::move(options.transport) : http::makeCurlTransport(std::move(options.curl));
+        ctx->transport     = options.transport ? std::move(options.transport) : http::makeCurlTransport(std::move(options.curl));
         return ctx;
     }
 }

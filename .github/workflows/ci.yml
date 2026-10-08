@@ -25,7 +25,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: lukka/run-vcpkg@v11
         with:
-          vcpkgGitCommitId: 'master'
+          vcpkgGitCommitId: "2750401336fb7c95f6619657a46a7e798661341c"
+          vcpkgJsonGlob: "vcpkg.json"
       - name: Configure
         run: >
           cmake -B build -DSUPABASE_BUILD_TESTS=ON -DSUPABASE_BUILD_EXAMPLES=ON

@@ -52,7 +52,7 @@ struct ChannelOptions
     bool broadcastSelf = false; ///< receive your own broadcasts
     bool broadcastAck  = false; ///< server acknowledges broadcasts
     std::string presenceKey;    ///< empty lets the server pick one
-    bool isPrivate     = false; ///< private channel (authorized through RLS)
+    bool isPrivate = false;     ///< private channel (authorized through RLS)
 };
 
 /// `event` is `*`, `INSERT`, `UPDATE` or `DELETE`; `filter` is e.g. `id=eq.1`.

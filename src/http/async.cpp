@@ -31,9 +31,10 @@ void sendAsync(std::shared_ptr<Transport> transport, Request request, std::funct
         return;
     try
     {
-        std::thread([transport = std::move(transport), request = std::move(request), done = std::move(done)]() {
-            done(sendGuarded(*transport, request));
-        }).detach();
+        std::thread(
+            [transport = std::move(transport), request = std::move(request), done = std::move(done)]()
+            { done(sendGuarded(*transport, request)); }
+        ).detach();
     }
     catch (...)
     {

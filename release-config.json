@@ -3,10 +3,16 @@
     ".": {
       "release-type": "simple",
       "package-name": "supabase-cpp",
+      "release-as": "0.5.0",
       "extra-files": [
         {
           "type": "generic",
           "path": "CMakeLists.txt"
+        },
+        {
+          "type": "json",
+          "path": "vcpkg.json",
+          "jsonpath": "$.version-string"
         }
       ]
     }

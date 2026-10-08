@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(supabase-cpp VERSION 0.1.0 LANGUAGES CXX) # x-release-please-version
+project(supabase-cpp VERSION 0.5.0 LANGUAGES CXX) # x-release-please-version
 
 option(SUPABASE_BUILD_TESTS "Build supabase-cpp tests" OFF)
 option(SUPABASE_BUILD_EXAMPLES "Build supabase-cpp examples" OFF)

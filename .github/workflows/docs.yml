@@ -17,6 +17,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: sudo apt-get update && sudo apt-get install -y doxygen
+      - run: mkdir -p build/docs
       - run: doxygen Doxyfile
       - uses: actions/upload-pages-artifact@v3
         with:

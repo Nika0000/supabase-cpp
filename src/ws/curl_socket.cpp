@@ -75,7 +75,7 @@ namespace
             const auto deadline = Clock::now() + std::chrono::seconds(10);
             while (!text.empty())
             {
-                std::size_t sent = 0;
+                std::size_t sent    = 0;
                 const CURLcode code = curl_ws_send(easy_, text.data(), text.size(), &sent, 0, CURLWS_TEXT);
                 if (code == CURLE_AGAIN)
                 {
@@ -99,9 +99,9 @@ namespace
             char buffer[16 * 1024];
             for (;;)
             {
-                std::size_t received              = 0;
-                const curl_ws_frame* meta         = nullptr;
-                const CURLcode code               = curl_ws_recv(easy_, buffer, sizeof(buffer), &received, &meta);
+                std::size_t received      = 0;
+                const curl_ws_frame* meta = nullptr;
+                const CURLcode code       = curl_ws_recv(easy_, buffer, sizeof(buffer), &received, &meta);
                 if (code == CURLE_AGAIN)
                 {
                     if (Clock::now() >= deadline)
@@ -157,7 +157,7 @@ namespace
         {
             return makeError(errc::Network, "websocket is not connected");
         }
-        void close() noexcept override { }
+        void close() noexcept override {}
     };
 #endif
 }

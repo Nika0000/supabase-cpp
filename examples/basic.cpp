@@ -22,8 +22,10 @@ int main()
         std::printf("%s\n", reply.value().body.c_str());
 
     auto room = client.realtime().channel("games");
-    room->onPostgresChanges({ .event = "INSERT", .table = "games" },
-        [](const supabase::Json& change) { std::printf("new row: %s\n", change["new"].dump().c_str()); });
+    room->onPostgresChanges(
+        { .event = "INSERT", .table = "games" },
+        [](const supabase::Json& change) { std::printf("new row: %s\n", change["new"].dump().c_str()); }
+    );
     if (auto subscribed = room->subscribe(); !subscribed)
         std::printf("realtime failed: %s\n", subscribed.error().message.c_str());
     // Events arrive on a worker thread; keep the process alive as long as you need them.

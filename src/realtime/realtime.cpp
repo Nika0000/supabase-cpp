@@ -1,10 +1,11 @@
+#include <condition_variable>
+#include <cstdint>
+
 #include <supabase/realtime/realtime.hpp>
 #include <supabase/ws.hpp>
 
 #include <algorithm>
 #include <atomic>
-#include <condition_variable>
-#include <cstdint>
 #include <iterator>
 #include <mutex>
 #include <optional>
@@ -21,13 +22,14 @@ namespace
     using Clock = std::chrono::steady_clock;
     using Calls = std::vector<std::function<void()>>;
 
-    constexpr auto kHeartbeatInterval = std::chrono::seconds(25);
-    constexpr auto kJoinTimeout       = std::chrono::seconds(10);
-    constexpr auto kRejoinDelay       = std::chrono::seconds(2);
-    constexpr auto kConnectTimeout    = std::chrono::seconds(10);
-    constexpr auto kPollInterval      = std::chrono::milliseconds(50);
-    constexpr std::chrono::milliseconds kReconnectBackoff[] = { std::chrono::milliseconds(1000), std::chrono::milliseconds(2000),
-        std::chrono::milliseconds(5000), std::chrono::milliseconds(10000) };
+    constexpr auto kHeartbeatInterval                       = std::chrono::seconds(25);
+    constexpr auto kJoinTimeout                             = std::chrono::seconds(10);
+    constexpr auto kRejoinDelay                             = std::chrono::seconds(2);
+    constexpr auto kConnectTimeout                          = std::chrono::seconds(10);
+    constexpr auto kPollInterval                            = std::chrono::milliseconds(50);
+    constexpr std::chrono::milliseconds kReconnectBackoff[] = {
+        std::chrono::milliseconds(1000), std::chrono::milliseconds(2000), std::chrono::milliseconds(5000), std::chrono::milliseconds(10000)
+    };
 
     std::string str(const Json& object, const char* key)
     {
@@ -43,7 +45,8 @@ namespace
 
     std::string dump(const Json& json) { return json.dump(-1, ' ', false, Json::error_handler_t::replace); }
 
-    std::string makeFrame(const std::string& topic, std::string_view event, Json payload, const std::string& ref, const std::string& joinRef = {})
+    std::string
+    makeFrame(const std::string& topic, std::string_view event, Json payload, const std::string& ref, const std::string& joinRef = {})
     {
         Json frame = { { "topic", topic }, { "event", event }, { "payload", std::move(payload) }, { "ref", ref } };
         if (!joinRef.empty())
@@ -90,7 +93,7 @@ namespace detail
     class Core : public std::enable_shared_from_this<Core>
     {
       public:
-        explicit Core(std::shared_ptr<const Context> ctx) : ctx_(std::move(ctx)) { }
+        explicit Core(std::shared_ptr<const Context> ctx) : ctx_(std::move(ctx)) {}
         ~Core()
         {
             stop();
@@ -191,8 +194,9 @@ struct RealtimeChannel::Impl
             postgres.push_back(std::move(entry));
         }
         Json config = { { "broadcast", { { "self", options.broadcastSelf }, { "ack", options.broadcastAck } } },
-            { "presence", { { "key", options.presenceKey } } }, { "postgres_changes", std::move(postgres) },
-            { "private", options.isPrivate } };
+                        { "presence", { { "key", options.presenceKey } } },
+                        { "postgres_changes", std::move(postgres) },
+                        { "private", options.isPrivate } };
 
         joinPending  = false;
         state        = ChannelState::Joining;
@@ -208,7 +212,7 @@ struct RealtimeChannel::Impl
             std::lock_guard lock(mu);
             if (state != ChannelState::Joining || joinRef.empty() || now < joinDeadline)
                 return;
-            state     = ChannelState::Errored;
+            state = ChannelState::Errored;
             joinRef.clear();
             joinPending = wantJoin;
             rejoinAt    = now + kRejoinDelay;
@@ -263,8 +267,12 @@ struct RealtimeChannel::Impl
                 Json& list = current["metas"];
                 for (const auto& meta : metas)
                 {
-                    const bool known = std::any_of(list.begin(), list.end(),
-                        [&](const Json& existing) { return !str(meta, "phx_ref").empty() && str(existing, "phx_ref") == str(meta, "phx_ref"); });
+                    const bool known = std::any_of(
+                        list.begin(),
+                        list.end(),
+                        [&](const Json& existing)
+                        { return !str(meta, "phx_ref").empty() && str(existing, "phx_ref") == str(meta, "phx_ref"); }
+                    );
                     if (!known)
                         list.push_back(meta);
                 }
@@ -280,8 +288,9 @@ struct RealtimeChannel::Impl
                     Json kept  = Json::array();
                     for (const auto& existing : list)
                     {
-                        const bool left = std::any_of(metas.begin(), metas.end(),
-                            [&](const Json& meta) { return str(meta, "phx_ref") == str(existing, "phx_ref"); });
+                        const bool left = std::any_of(
+                            metas.begin(), metas.end(), [&](const Json& meta) { return str(meta, "phx_ref") == str(existing, "phx_ref"); }
+                        );
                         if (!left)
                             kept.push_back(existing);
                     }
@@ -301,8 +310,8 @@ struct RealtimeChannel::Impl
         const Json response = field(payload, "response");
         if (str(payload, "status") != "ok")
         {
-            state    = ChannelState::Errored;
-            wantJoin = false; // a rejected join (bad filter, RLS) will not heal by retrying
+            state              = ChannelState::Errored;
+            wantJoin           = false; // a rejected join (bad filter, RLS) will not heal by retrying
             std::string reason = str(response, "reason");
             if (reason.empty())
                 reason = str(response, "message");
@@ -311,7 +320,7 @@ struct RealtimeChannel::Impl
             calls = statusCall(onStatus, SubscribeStatus::ChannelError, std::move(reason));
             return;
         }
-        state = ChannelState::Joined;
+        state               = ChannelState::Joined;
         const Json assigned = field(response, "postgres_changes", Json::array());
         std::size_t index   = 0;
         for (auto& binding : bindings)
@@ -357,17 +366,22 @@ struct RealtimeChannel::Impl
             }
             else if (event == "postgres_changes")
             {
-                const Json data = field(payload, "data");
-                const Json ids  = field(payload, "ids", Json::array());
+                const Json data        = field(payload, "data");
+                const Json ids         = field(payload, "ids", Json::array());
                 const std::string type = str(data, "type");
-                auto mapped            = std::make_shared<const Json>(Json { { "schema", str(data, "schema") }, { "table", str(data, "table") },
-                    { "commit_timestamp", str(data, "commit_timestamp") }, { "eventType", type }, { "new", field(data, "record") },
-                    { "old", field(data, "old_record") }, { "errors", field(data, "errors", Json()) } });
+                auto mapped            = std::make_shared<const Json>(Json { { "schema", str(data, "schema") },
+                                                                             { "table", str(data, "table") },
+                                                                             { "commit_timestamp", str(data, "commit_timestamp") },
+                                                                             { "eventType", type },
+                                                                             { "new", field(data, "record") },
+                                                                             { "old", field(data, "old_record") },
+                                                                             { "errors", field(data, "errors", Json()) } });
                 for (const auto& binding : bindings)
                 {
                     if (binding.kind != Binding::Kind::Postgres || (binding.filter.event != "*" && binding.filter.event != type))
                         continue;
-                    const bool matches = ids.is_array() && std::any_of(ids.begin(), ids.end(), [&](const Json& id) { return id == binding.id; });
+                    const bool matches
+                        = ids.is_array() && std::any_of(ids.begin(), ids.end(), [&](const Json& id) { return id == binding.id; });
                     if (matches)
                         calls.emplace_back([callback = binding.callback, mapped] { callback(*mapped); });
                 }
@@ -506,8 +520,13 @@ Result<void> RealtimeChannel::send(std::string_view event, const Json& payload)
         std::lock_guard lock(impl_->mu);
         if (impl_->state != ChannelState::Joined)
             return makeError(errc::InvalidArgument, "channel is not joined");
-        frame = makeFrame(impl_->topic, "broadcast", { { "type", "broadcast" }, { "event", event }, { "payload", payload } }, core->nextRef(),
-            impl_->joinRef);
+        frame = makeFrame(
+            impl_->topic,
+            "broadcast",
+            { { "type", "broadcast" }, { "event", event }, { "payload", payload } },
+            core->nextRef(),
+            impl_->joinRef
+        );
     }
     core->push(std::move(frame));
     return {};
@@ -523,8 +542,13 @@ Result<void> RealtimeChannel::track(const Json& payload)
         std::lock_guard lock(impl_->mu);
         if (impl_->state != ChannelState::Joined)
             return makeError(errc::InvalidArgument, "channel is not joined");
-        frame = makeFrame(impl_->topic, "presence", { { "type", "presence" }, { "event", "track" }, { "payload", payload } }, core->nextRef(),
-            impl_->joinRef);
+        frame = makeFrame(
+            impl_->topic,
+            "presence",
+            { { "type", "presence" }, { "event", "track" }, { "payload", payload } },
+            core->nextRef(),
+            impl_->joinRef
+        );
     }
     core->push(std::move(frame));
     return {};
@@ -588,8 +612,8 @@ namespace detail
         }
         if (!ctx_->socketFactory)
             return makeError(errc::NotImplemented, "no websocket factory configured");
-        stop_   = false;
-        worker_ = std::thread([this] { run(); });
+        stop_     = false;
+        worker_   = std::thread([this] { run(); });
         workerId_ = worker_.get_id();
         return {};
     }
@@ -641,7 +665,8 @@ namespace detail
                 std::lock_guard lock(channel->impl_->mu);
                 if (channel->impl_->state != ChannelState::Joined)
                     continue;
-                frame = makeFrame(channel->impl_->topic, "access_token", { { "access_token", current } }, nextRef(), channel->impl_->joinRef);
+                frame
+                    = makeFrame(channel->impl_->topic, "access_token", { { "access_token", current } }, nextRef(), channel->impl_->joinRef);
             }
             push(std::move(frame));
         }
@@ -700,7 +725,9 @@ namespace detail
             if (stop_)
                 break;
             std::unique_lock lock(mu_);
-            wake_.wait_for(lock, kReconnectBackoff[std::min<std::size_t>(attempt++, std::size(kReconnectBackoff) - 1)], [this] { return stop_.load(); });
+            wake_.wait_for(
+                lock, kReconnectBackoff[std::min<std::size_t>(attempt++, std::size(kReconnectBackoff) - 1)], [this] { return stop_.load(); }
+            );
         }
         closeChannels();
     }
@@ -776,8 +803,8 @@ namespace detail
             bool wasActive;
             {
                 std::lock_guard lock(channel->impl_->mu);
-                wasActive                 = channel->impl_->wantJoin;
-                callback                  = channel->impl_->onStatus;
+                wasActive                   = channel->impl_->wantJoin;
+                callback                    = channel->impl_->onStatus;
                 channel->impl_->wantJoin    = false;
                 channel->impl_->joinPending = false;
                 channel->impl_->state       = ChannelState::Closed;
@@ -789,7 +816,7 @@ namespace detail
     }
 }
 
-RealtimeClient::RealtimeClient(std::shared_ptr<const Context> ctx) : core_(std::make_shared<detail::Core>(std::move(ctx))) { }
+RealtimeClient::RealtimeClient(std::shared_ptr<const Context> ctx) : core_(std::make_shared<detail::Core>(std::move(ctx))) {}
 
 std::shared_ptr<RealtimeChannel> RealtimeClient::channel(std::string_view name, ChannelOptions options) const
 {

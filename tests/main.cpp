@@ -1,10 +1,10 @@
 // Dependency-free tests driven by a mock transport. No network access.
+#include <chrono>
+#include <condition_variable>
 #include <cstdio>
 
 #include <supabase/supabase.hpp>
 
-#include <chrono>
-#include <condition_variable>
 #include <deque>
 #include <mutex>
 #include <optional>
@@ -384,8 +384,10 @@ void realtimeChannelLifecycle()
     std::mutex mu;
     std::vector<Json> changes, broadcasts, syncs, joins;
     std::vector<realtime::SubscribeStatus> statuses;
-    auto record = [&](std::vector<Json>& into) {
-        return [&](const Json& payload) {
+    auto record = [&](std::vector<Json>& into)
+    {
+        return [&](const Json& payload)
+        {
             std::lock_guard lock(mu);
             into.push_back(payload);
         };
@@ -398,10 +400,15 @@ void realtimeChannelLifecycle()
         .onBroadcast("ping", record(broadcasts))
         .onPresence(realtime::PresenceEvent::Sync, record(syncs))
         .onPresence(realtime::PresenceEvent::Join, record(joins));
-    CHECK(channel->subscribe([&](realtime::SubscribeStatus status, const std::string&) {
-        std::lock_guard lock(mu);
-        statuses.push_back(status);
-    }).ok());
+    CHECK(channel
+              ->subscribe(
+                  [&](realtime::SubscribeStatus status, const std::string&)
+                  {
+                      std::lock_guard lock(mu);
+                      statuses.push_back(status);
+                  }
+              )
+              .ok());
 
     CHECK(waitUntil([&] { return !state->find("phx_join").is_null(); }));
     const Json join = state->find("phx_join");
@@ -412,28 +419,39 @@ void realtimeChannelLifecycle()
     CHECK(join["payload"]["config"]["postgres_changes"][0]["filter"] == "id=eq.1");
 
     const std::string ref = join["ref"];
-    state->push(frame("realtime:room", "phx_reply",
-        { { "status", "ok" }, { "response", { { "postgres_changes", Json::array({ Json { { "id", 42 } } }) } } } }, ref));
+    state->push(frame(
+        "realtime:room",
+        "phx_reply",
+        { { "status", "ok" }, { "response", { { "postgres_changes", Json::array({ Json { { "id", 42 } } }) } } } },
+        ref
+    ));
     CHECK(waitUntil([&] { return channel->state() == realtime::ChannelState::Joined; }));
-    CHECK(waitUntil([&] {
-        std::lock_guard lock(mu);
-        return statuses.size() == 1;
-    }));
+    CHECK(waitUntil(
+        [&]
+        {
+            std::lock_guard lock(mu);
+            return statuses.size() == 1;
+        }
+    ));
     CHECK(statuses[0] == realtime::SubscribeStatus::Subscribed);
 
     // Wrong id and wrong event type are filtered; the later broadcast proves they were already processed.
-    const auto change = [](int id, const char* type) {
+    const auto change = [](int id, const char* type)
+    {
         return Json { { "ids", Json::array({ id }) },
-            { "data", { { "schema", "public" }, { "table", "games" }, { "type", type }, { "record", { { "id", 1 } } } } } };
+                      { "data", { { "schema", "public" }, { "table", "games" }, { "type", type }, { "record", { { "id", 1 } } } } } };
     };
     state->push(frame("realtime:room", "postgres_changes", change(7, "INSERT")));
     state->push(frame("realtime:room", "postgres_changes", change(42, "UPDATE")));
     state->push(frame("realtime:room", "postgres_changes", change(42, "INSERT")));
     state->push(frame("realtime:room", "broadcast", { { "type", "broadcast" }, { "event", "ping" }, { "payload", { { "n", 1 } } } }));
-    CHECK(waitUntil([&] {
-        std::lock_guard lock(mu);
-        return !broadcasts.empty();
-    }));
+    CHECK(waitUntil(
+        [&]
+        {
+            std::lock_guard lock(mu);
+            return !broadcasts.empty();
+        }
+    ));
     {
         std::lock_guard lock(mu);
         CHECK(changes.size() == 1);
@@ -446,10 +464,13 @@ void realtimeChannelLifecycle()
     const auto metas = [](const char* phxRef) { return Json { { "metas", Json::array({ Json { { "phx_ref", phxRef } } }) } }; };
     state->push(frame("realtime:room", "presence_state", { { "u1", metas("a") } }));
     state->push(frame("realtime:room", "presence_diff", { { "joins", { { "u2", metas("b") } } }, { "leaves", { { "u1", metas("a") } } } }));
-    CHECK(waitUntil([&] {
-        std::lock_guard lock(mu);
-        return syncs.size() == 2;
-    }));
+    CHECK(waitUntil(
+        [&]
+        {
+            std::lock_guard lock(mu);
+            return syncs.size() == 2;
+        }
+    ));
     const Json presence = channel->presenceState();
     CHECK(!presence.contains("u1"));
     CHECK(presence["u2"]["metas"].size() == 1);
@@ -480,19 +501,27 @@ void realtimeJoinErrorIsReported()
     std::string message;
     bool failed  = false;
     auto channel = client.realtime().channel("bad");
-    CHECK(channel->subscribe([&](realtime::SubscribeStatus status, const std::string& reason) {
-        std::lock_guard lock(mu);
-        failed  = status == realtime::SubscribeStatus::ChannelError;
-        message = reason;
-    }).ok());
+    CHECK(channel
+              ->subscribe(
+                  [&](realtime::SubscribeStatus status, const std::string& reason)
+                  {
+                      std::lock_guard lock(mu);
+                      failed  = status == realtime::SubscribeStatus::ChannelError;
+                      message = reason;
+                  }
+              )
+              .ok());
     CHECK(channel->subscribe().error().code == errc::InvalidArgument);
     CHECK(waitUntil([&] { return !state->find("phx_join").is_null(); }));
     const std::string ref = state->find("phx_join")["ref"];
     state->push(frame("realtime:bad", "phx_reply", { { "status", "error" }, { "response", { { "reason", "no such table" } } } }, ref));
-    CHECK(waitUntil([&] {
-        std::lock_guard lock(mu);
-        return failed;
-    }));
+    CHECK(waitUntil(
+        [&]
+        {
+            std::lock_guard lock(mu);
+            return failed;
+        }
+    ));
     CHECK(message == "no such table");
     CHECK(channel->state() == realtime::ChannelState::Errored);
 }

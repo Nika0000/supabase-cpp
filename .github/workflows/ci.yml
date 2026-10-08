@@ -13,7 +13,7 @@ jobs:
       - name: clang-format
         run: |
           files=$(git ls-files '*.cpp' '*.hpp')
-          clang-format --dry-run --Werror $files
+          pipx run --spec clang-format==20.1.7 clang-format --dry-run --Werror $files
 
   build:
     strategy:

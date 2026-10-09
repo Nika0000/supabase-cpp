@@ -10,12 +10,14 @@ namespace
         while (!url.empty() && url.back() == '/')
             url.pop_back();
 
-        auto ctx           = std::make_shared<Context>();
-        ctx->url           = std::move(url);
-        ctx->anonKey       = std::move(anonKey);
-        ctx->schema        = std::move(options.schema);
-        ctx->headers       = std::move(options.headers);
-        ctx->timeout       = options.timeout;
+        auto ctx     = std::make_shared<Context>();
+        ctx->url     = std::move(url);
+        ctx->anonKey = std::move(anonKey);
+        ctx->schema  = std::move(options.schema);
+        ctx->headers = std::move(options.headers);
+        ctx->timeout = options.timeout;
+        // Capture WebSocket curl settings before moving them into the default HTTP
+        // provider. An injected HTTP transport does not suppress the default socket factory.
         ctx->socketFactory = options.socketFactory ? std::move(options.socketFactory) : ws::makeCurlSocketFactory(options.curl);
         ctx->transport     = options.transport ? std::move(options.transport) : http::makeCurlTransport(std::move(options.curl));
         return ctx;
@@ -38,7 +40,7 @@ postgrest::FilterBuilder SchemaClient::rpc(std::string_view fn, const Json& args
 
 SchemaClient Client::schema(std::string_view name) const
 {
-    // Copying the context keeps the transport and the bearer callback, which refers to the one auth instance.
+    // Separate the schema setting while preserving shared transport and bearer resolution.
     auto scoped    = std::make_shared<Context>(*m_ctx);
     scoped->schema = std::string(name);
     return SchemaClient(std::move(scoped));

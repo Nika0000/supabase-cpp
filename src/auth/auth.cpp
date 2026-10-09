@@ -394,6 +394,33 @@ Result<void> AuthClient::signInWithOtp(const OtpCredentials& credentials)
     return {};
 }
 
+Result<AuthResponse> AuthClient::verifyOtp(const VerifyOtpParams& params)
+{
+    if (params.type.empty())
+        return makeError(errc::InvalidArgument, "type is required");
+    Json body = { { "type", params.type } };
+    if (!params.tokenHash.empty())
+    {
+        body["token_hash"] = params.tokenHash;
+    }
+    else
+    {
+        if (params.token.empty() || params.email.empty() == params.phone.empty())
+            return makeError(errc::InvalidArgument, "provide tokenHash, or token with exactly one of email or phone");
+        body["token"] = params.token;
+        putIfSet(body, "email", params.email);
+        putIfSet(body, "phone", params.phone);
+    }
+
+    auto reply = m_impl->call(http::Method::Post, withRedirect("/auth/v1/verify", params.redirectTo), &body, {});
+    if (!reply)
+        return reply.error();
+    auto response = toAuthResponse(reply.value());
+    if (response.session)
+        m_impl->store(*response.session, AuthEvent::SignedIn);
+    return response;
+}
+
 std::string AuthClient::getOAuthSignInUrl(std::string_view provider, const OAuthOptions& options) const
 {
     std::string url = m_impl->ctx->endpoint("/auth/v1/authorize?provider=") + postgrest::urlEncode(provider);

@@ -113,6 +113,8 @@ struct CurlOptions
     /// In-memory PEM trust store. With libcurl >= 7.77, overrides caBundle when
     /// nonempty; older builds use caBundle instead.
     std::string caBundleBlob;
+    /// Base64 SPKI SHA-256 pins; a connection must match one when nonempty.
+    std::vector<std::string> pinnedSha256;
     /// User-Agent sent with requests.
     std::string userAgent = "supabase-cpp";
     /// Proxy URL; empty leaves proxy selection to curl and its environment.
@@ -126,6 +128,19 @@ struct CurlOptions
     /// Verify the TLS certificate and hostname using the configured trust store.
     bool verifyPeer = true;
 };
+
+/// Value for CURLOPT_PINNEDPUBLICKEY built from `pinnedSha256`; empty when no pins are set.
+[[nodiscard]] inline std::string curlPinnedKeys(const CurlOptions& options)
+{
+    std::string out;
+    for (const auto& pin : options.pinnedSha256)
+    {
+        if (!out.empty())
+            out += ';';
+        out += "sha256//" + pin;
+    }
+    return out;
+}
 
 /// @brief Create a shared curl transport without sending a request.
 /// @param options Transport settings copied into the implementation.

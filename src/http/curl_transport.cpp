@@ -184,6 +184,8 @@ namespace
 #endif
                 if (!m_options.caBundle.empty())
                 curl_easy_setopt(curl, CURLOPT_CAINFO, m_options.caBundle.c_str());
+            if (const auto pins = curlPinnedKeys(m_options); !pins.empty())
+                curl_easy_setopt(curl, CURLOPT_PINNEDPUBLICKEY, pins.c_str());
             if (!m_options.proxy.empty())
                 curl_easy_setopt(curl, CURLOPT_PROXY, m_options.proxy.c_str());
 

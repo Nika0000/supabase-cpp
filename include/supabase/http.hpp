@@ -68,7 +68,7 @@ struct Response
     int status = 0;
     /// Received headers in transport order.
     Headers headers;
-    /// Buffered response bytes; empty when a chunk callback is used.
+    /// Buffered response bytes; empty for 2xx responses delivered to a chunk callback.
     std::string body;
 
     /// @brief Whether the HTTP status is in the successful range [200, 300).
@@ -84,7 +84,8 @@ struct Response
 /// The view borrows transport memory and is valid only during the callback. Copy
 /// bytes that must outlive the call. With curl, this runs on the sending thread
 /// and must not throw. Return false to stop reception; curl returns the partial
-/// response as a successful Result rather than a cancellation error.
+/// response as a successful Result rather than a cancellation error. Only 2xx
+/// response bodies are delivered; other statuses are buffered in Response::body.
 using ChunkCallback = std::function<bool(std::string_view)>;
 
 /// @brief Thread-safe interface for synchronous HTTP transfers.
@@ -98,7 +99,8 @@ class Transport
 
     /// @brief Perform a request, optionally delivering its body incrementally.
     /// @param request Request data, borrowed until this call returns.
-    /// @param onChunk Optional body consumer; Response::body stays empty when set.
+    /// @param onChunk Optional body consumer for 2xx responses. Bodies of other statuses are
+    /// buffered in Response::body and never passed to it.
     /// @return Response including its HTTP status, or a transport error.
     /// @note Curl does not retry streaming requests. Callbacks run synchronously
     /// within this call and must not throw.

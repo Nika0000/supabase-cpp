@@ -23,13 +23,18 @@ namespace
         const ChunkCallback* onChunk = nullptr;
         const CancelToken* cancel    = nullptr;
         bool stoppedByCallback       = false;
+        CURL* curl                   = nullptr;
     };
 
     std::size_t onBody(char* data, std::size_t size, std::size_t count, void* user)
     {
         auto& transfer          = *static_cast<Transfer*>(user);
         const std::size_t bytes = size * count;
-        if (transfer.onChunk != nullptr && *transfer.onChunk)
+        // Only successful bodies reach the chunk callback; an error body is buffered in the response.
+        long status = 0;
+        if (transfer.curl != nullptr)
+            curl_easy_getinfo(transfer.curl, CURLINFO_RESPONSE_CODE, &status);
+        if (transfer.onChunk != nullptr && *transfer.onChunk && status >= 200 && status < 300)
         {
             if (!(*transfer.onChunk)(std::string_view(data, bytes)))
             {
@@ -152,7 +157,7 @@ namespace
             curl_easy_reset(curl);
 
             Response response;
-            Transfer transfer { .response = &response, .onChunk = &onChunk, .cancel = &request.cancel, .stoppedByCallback = false };
+            Transfer transfer { .response = &response, .onChunk = &onChunk, .cancel = &request.cancel, .stoppedByCallback = false, .curl = curl };
 
             curl_slist* headers = nullptr;
             for (const auto& [name, value] : request.headers)

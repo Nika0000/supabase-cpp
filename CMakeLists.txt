@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(supabase-cpp VERSION 0.5.0 LANGUAGES CXX) # x-release-please-version
+project(supabase-cpp VERSION 0.6.0 LANGUAGES CXX) # x-release-please-version
 
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)

@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.6.0](https://github.com/Nika0000/supabase-cpp/compare/supabase-cpp-v0.5.0...supabase-cpp-v0.6.0) (2026-10-13)
+
+
+### Features
+
+* add OTP verification and document public APIs ([472326a](https://github.com/Nika0000/supabase-cpp/commit/472326a65f22e1beab2ad763eeb6254145762d56))
+* add schema queries, scoped sign-out, and CMake export ([433aedd](https://github.com/Nika0000/supabase-cpp/commit/433aedd3317b4c6d3ab12676e2696ceac8c2aeab))
+* support TLS public key pinning for HTTP and WebSocket transports ([b216ffd](https://github.com/Nika0000/supabase-cpp/commit/b216ffdde5406c56efe4cf940073417ff6871035))
+
+
+### Bug Fixes
+
+* format Realtime integration test ([a27ae4c](https://github.com/Nika0000/supabase-cpp/commit/a27ae4c77cdbde2d797458c568f54ff4e7a0d594))
+* **http:** deliver only 2xx bodies to streaming chunk callbacks ([6943fc0](https://github.com/Nika0000/supabase-cpp/commit/6943fc0381020489c2ada7dcf626f44c7c55aa07))
+* wait for Postgres subscription in integration test ([8d3e6d3](https://github.com/Nika0000/supabase-cpp/commit/8d3e6d3327d8de02de7d5177a7acce09713095c2))
+
 ## [0.5.0](https://github.com/Nika0000/supabase-cpp/compare/supabase-cpp-v0.5.0...supabase-cpp-v0.5.0) (2026-10-08)
 
 

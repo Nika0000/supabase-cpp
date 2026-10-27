@@ -115,6 +115,9 @@ struct CurlOptions
     /// In-memory PEM trust store. With libcurl >= 7.77, overrides caBundle when
     /// nonempty; older builds use caBundle instead.
     std::string caBundleBlob;
+    /// Trust the operating-system certificate store (CURLSSLOPT_NATIVE_CA, libcurl >= 7.71).
+    /// Ignored when caBundle or caBundleBlob is set.
+    bool useSystemStore = false;
     /// Base64 SPKI SHA-256 pins; a connection must match one when nonempty.
     std::vector<std::string> pinnedSha256;
     /// User-Agent sent with requests.

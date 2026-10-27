@@ -54,6 +54,10 @@ namespace
 #endif
                 if (!m_options.caBundle.empty())
                 curl_easy_setopt(m_easy, CURLOPT_CAINFO, m_options.caBundle.c_str());
+#if LIBCURL_VERSION_NUM >= 0x074700 // 7.71.0
+            if (m_options.useSystemStore && m_options.caBundle.empty() && m_options.caBundleBlob.empty())
+                curl_easy_setopt(m_easy, CURLOPT_SSL_OPTIONS, static_cast<long>(CURLSSLOPT_NATIVE_CA));
+#endif
             if (const auto pins = http::curlPinnedKeys(m_options); !pins.empty())
                 curl_easy_setopt(m_easy, CURLOPT_PINNEDPUBLICKEY, pins.c_str());
             if (!m_options.proxy.empty())

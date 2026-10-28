@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/Nika0000/supabase-cpp/compare/supabase-cpp-v0.6.0...supabase-cpp-v0.7.0) (2026-10-27)
+
+
+### Features
+
+* **http:** add useSystemStore option to trust the OS certificate store ([672584f](https://github.com/Nika0000/supabase-cpp/commit/672584fab6ed07363d987d7ddf03394927ab367e))
+
 ## [0.6.0](https://github.com/Nika0000/supabase-cpp/compare/supabase-cpp-v0.5.0...supabase-cpp-v0.6.0) (2026-10-13)
 
 
